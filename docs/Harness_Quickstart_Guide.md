@@ -67,9 +67,9 @@
 
 ### 4.1 UI 层
 
-- [MainActivity.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/MainActivity.kt)
-- [ModelManagerActivity.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelManagerActivity.kt)
-- [TtsActivity.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/TtsActivity.kt)
+- [MainActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/MainActivity.kt)
+- [ModelManagerActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelManagerActivity.kt)
+- [TtsActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/TtsActivity.kt)
 
 作用：
 
@@ -79,7 +79,7 @@
 
 ### 4.2 模型定义层
 
-- [ModelInfo.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)
+- [ModelInfo.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)
 
 作用：
 
@@ -92,7 +92,7 @@
 
 ### 4.3 编排与运行时层
 
-- [LlamaEngine.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)
+- [LlamaEngine.kt](../app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)
 
 作用非常重，当前它同时负责：
 
@@ -110,7 +110,7 @@
 
 ### 4.4 下载服务层
 
-- [ModelDownloadService.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt)
+- [ModelDownloadService.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt)
 
 作用：
 
@@ -120,8 +120,8 @@
 
 ### 4.5 Native 层
 
-- [llama_jni.cpp](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/cpp/llama_jni.cpp)
-- [CMakeLists.txt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/cpp/CMakeLists.txt)
+- [llama_jni.cpp](../app/src/main/cpp/llama_jni.cpp)
+- [CMakeLists.txt](../app/src/main/cpp/CMakeLists.txt)
 
 作用：
 
@@ -132,10 +132,10 @@
 
 ### 4.6 当前新增的 Harness 层
 
-- [HarnessFacade.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
-- [HarnessBackend.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/harness/HarnessBackend.kt)
-- [LlamaBackendAdapter.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/harness/LlamaBackendAdapter.kt)
-- [HarnessModelSpec.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelSpec.kt)
+- [HarnessFacade.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
+- [HarnessBackend.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessBackend.kt)
+- [LlamaBackendAdapter.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/LlamaBackendAdapter.kt)
+- [HarnessModelSpec.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelSpec.kt)
 
 这是这次最小改动新增的结构，用来把 UI 和 `LlamaEngine` 之间先隔出一层边界。
 
@@ -278,17 +278,17 @@ Harness 更准确的角色是：
 
 为了最快建立认知，建议按这个顺序读：
 
-1. [ModelInfo.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)
+1. [ModelInfo.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)
    - 先看模型有哪些、哪些是 text-only、哪些是 vision、哪些是 tts
-2. [HarnessFacade.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
+2. [HarnessFacade.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
    - 看页面现在通过什么入口访问能力
-3. [MainActivity.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/MainActivity.kt)
+3. [MainActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/MainActivity.kt)
    - 看聊天主链路
-4. [ModelManagerActivity.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelManagerActivity.kt)
+4. [ModelManagerActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelManagerActivity.kt)
    - 看模型下载、加载、切换主链路
-5. [LlamaEngine.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)
+5. [LlamaEngine.kt](../app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)
    - 看当前实际业务逻辑集中在哪里
-6. [llama_jni.cpp](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/cpp/llama_jni.cpp)
+6. [llama_jni.cpp](../app/src/main/cpp/llama_jni.cpp)
    - 最后再看 native 细节
 
 这个顺序比一开始就冲进 JNI 更容易建立全局认知。
@@ -351,9 +351,9 @@ Harness 更准确的角色是：
 
 如果你理解完这份快速说明，下一步建议看下面两份：
 
-- [Inte_Harness.md](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/docs/Harness/Inte_Harness.md)
+- [Inte_Harness.md](Harness/Inte_Harness.md)
   - 解释当前为什么这样接入 Harness，以及后续分阶段改造思路
-- [Lightweight_Model_SDK_Roadmap.md](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/docs/Harness/Lightweight_Model_SDK_Roadmap.md)
+- [Lightweight_Model_SDK_Roadmap.md](Harness/Lightweight_Model_SDK_Roadmap.md)
   - 解释轻量模型接入路径和跨平台游戏 LLM SDK 的演进路线
 
 ## 17. 这份文档的最终定位

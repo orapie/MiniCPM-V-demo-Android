@@ -20,7 +20,7 @@
 - 模型下载、切换、加载与删除
 - TTS 页面与语音相关能力入口
 
-当前代码中已经包含多类模型接入定义，核心模型信息集中在 [app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)。
+当前代码中已经包含多类模型接入定义，核心模型信息集中在 [app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt](app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)。
 
 ## 项目结构
 
@@ -78,20 +78,20 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## 关键文件
 
-- [app/build.gradle.kts](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/build.gradle.kts)：Android 构建配置、ABI、NDK、CMake 与依赖声明
-- [app/src/main/AndroidManifest.xml](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/AndroidManifest.xml)：应用组件、权限与前台下载服务配置
-- [app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)：模型加载、推理、预填充与运行时主逻辑
-- [app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt)：后台模型下载服务
-- [app/src/main/cpp/llama_jni.cpp](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/app/src/main/cpp/llama_jni.cpp)：JNI 桥接与 Native 推理接入
+- [app/build.gradle.kts](app/build.gradle.kts)：Android 构建配置、ABI、NDK、CMake 与依赖声明
+- [app/src/main/AndroidManifest.xml](app/src/main/AndroidManifest.xml)：应用组件、权限与前台下载服务配置
+- [app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt](app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)：模型加载、推理、预填充与运行时主逻辑
+- [app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt](app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt)：后台模型下载服务
+- [app/src/main/cpp/llama_jni.cpp](app/src/main/cpp/llama_jni.cpp)：JNI 桥接与 Native 推理接入
 
 ## 文档索引
 
 仓库内已有更详细的设计与接入文档，建议按需阅读：
 
-- [docs/Harness_Quickstart_Guide.md](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/docs/Harness_Quickstart_Guide.md)：项目整体结构、能力边界与 Harness 快速认知
-- [docs/Harness/Inte_Harness.md](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/docs/Harness/Inte_Harness.md)：Harness 接入方案
-- [docs/Harness/Lightweight_Model_SDK_Roadmap.md](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/docs/Harness/Lightweight_Model_SDK_Roadmap.md)：轻量模型 SDK 化演进路线
-- [docs/Harness/Mini_Change.md](/Users/alexander/Coding/Android-Studio/MiniCPM/MiniCPM-V-demo-Android/docs/Harness/Mini_Change.md)：相关变更说明
+- [docs/Harness_Quickstart_Guide.md](docs/Harness_Quickstart_Guide.md)：项目整体结构、能力边界与 Harness 快速认知
+- [docs/Harness/Inte_Harness.md](docs/Harness/Inte_Harness.md)：Harness 接入方案
+- [docs/Harness/Lightweight_Model_SDK_Roadmap.md](docs/Harness/Lightweight_Model_SDK_Roadmap.md)：轻量模型 SDK 化演进路线
+- [docs/Harness/Mini_Change.md](docs/Harness/Mini_Change.md)：相关变更说明
 
 ## 说明
 
