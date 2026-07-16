@@ -24,6 +24,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.textfield.TextInputEditText
+import com.example.minicpm_v_demo.harness.HarnessFacade
 import io.noties.markwon.Markwon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,7 +32,6 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appBarLayout: AppBarLayout
     private lateinit var tvTitle: TextView
 
-    private lateinit var engine: LlamaEngine
+    private lateinit var harness: HarnessFacade
     private var generationJob: Job? = null
     private var isModelReady = false
     private var isImagePrefilled = false
@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createdWithLocale = LocaleManager.currentLanguage(this).tag
+        harness = HarnessFacade.getInstance(applicationContext)
 
         // If the selected model is a TTS model, redirect to TtsActivity immediately.
         // The chat interface is only meaningful for LLM/VLM models.
@@ -91,12 +92,12 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        LlamaEngine.migrateLegacyLayoutIfNeeded(applicationContext)
+        harness.migrateLegacyLayoutIfNeeded()
 
         initViews()
         setupRecyclerView()
         setupClickListeners()
-        initEngine()
+        observeEngineState()
     }
 
     private fun initViews() {
@@ -115,7 +116,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         chatAdapter = ChatAdapter(Markwon.create(this))
         chatAdapter.setOnStopClick {
-            engine.cancelGeneration()
+            harness.cancelGeneration()
         }
         chatAdapter.setOnSuggestionClick { suggestion ->
             if (isModelReady && !isProcessingVideo) {
@@ -140,7 +141,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        val selectedModel = LlamaEngine.getSelectedModel(applicationContext)
+        val selectedModel = harness.getSelectedModel()
         messages.add(ChatMessage.WelcomeCard(isTextOnly = selectedModel.isTextOnly))
         chatAdapter.submitList(messages.toList())
     }
@@ -212,7 +213,7 @@ class MainActivity : AppCompatActivity() {
         val slider = view.findViewById<com.google.android.material.slider.Slider>(R.id.slider_image_slice)
         val tvValue = view.findViewById<android.widget.TextView>(R.id.tv_image_slice_value)
 
-        val initial = LlamaEngine.getImageMaxSliceNums(this)
+        val initial = harness.getImageMaxSliceNums()
         slider.value = initial.toFloat()
         tvValue.text = initial.toString()
         slider.addOnChangeListener { _, value, _ -> tvValue.text = value.toInt().toString() }
@@ -223,8 +224,8 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val chosen = slider.value.toInt()
                 lifecycleScope.launch {
-                    engine.setImageMaxSliceNums(chosen)
-                    val msgRes = if (engine.isVisionSupported) {
+                    harness.setImageMaxSliceNums(chosen)
+                    val msgRes = if (harness.isVisionSupported) {
                         R.string.image_slice_apply_toast
                     } else {
                         R.string.image_slice_pending_toast
@@ -238,7 +239,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearChatUI() {
         messages.clear()
-        val selectedModel = LlamaEngine.getSelectedModel(applicationContext)
+        val selectedModel = harness.getSelectedModel()
         messages.add(ChatMessage.WelcomeCard(isTextOnly = selectedModel.isTextOnly))
         messageIdCounter = 1L
         isImagePrefilled = false
@@ -248,7 +249,7 @@ class MainActivity : AppCompatActivity() {
     private fun clearChat() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                engine.clearContext()
+                harness.clearContext()
                 withContext(Dispatchers.Main) {
                     clearChatUI()
                     Toast.makeText(this@MainActivity, R.string.clear_chat_toast, Toast.LENGTH_SHORT).show()
@@ -262,18 +263,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initEngine() {
-        lifecycleScope.launch(Dispatchers.Default) {
-            engine = LlamaEngine.getInstance(applicationContext)
-            withContext(Dispatchers.Main) {
-                observeEngineState()
-            }
-        }
-    }
-
     private fun observeEngineState() {
         lifecycleScope.launch {
-            engine.state.collect { state ->
+            harness.state.collect { state ->
                 when (state) {
                     is LlamaState.Uninitialized,
                     is LlamaState.Initializing -> {
@@ -291,7 +283,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     is LlamaState.ModelReady -> {
                         isModelReady = true
-                        loadedModelId = LlamaEngine.getSelectedModel(applicationContext).id
+                        loadedModelId = harness.getSelectedModel().id
                         enableInput(true)
                         updateUIForModelType()
                     }
@@ -323,18 +315,18 @@ class MainActivity : AppCompatActivity() {
         if (!enable) {
             btnImage.isEnabled = false
         } else {
-            btnImage.isEnabled = engine.isVisionSupported
+            btnImage.isEnabled = harness.isVisionSupported
         }
     }
 
     private fun shouldRedirectToTts(): Boolean {
-        val model = LlamaEngine.getSelectedModel(applicationContext)
+        val model = harness.getSelectedModel()
         return model.isTts
     }
 
     private fun updateUIForModelType() {
-        val model = LlamaEngine.getSelectedModel(applicationContext)
-        val isVision = engine.isVisionSupported
+        val model = harness.getSelectedModel()
+        val isVision = harness.isVisionSupported
 
         tvTitle.setText(if (isVision) R.string.app_title else R.string.app_title_text)
         btnImage.visibility = if (isVision) View.VISIBLE else View.GONE
@@ -353,31 +345,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadDefaultModel() {
-        val ctx = applicationContext
-        val model = LlamaEngine.getSelectedModel(ctx)
-        val ggufFile = File(LlamaEngine.modelPath(ctx))
-        val mmprojPathStr = LlamaEngine.mmprojPath(ctx)
-        val mmprojFile = mmprojPathStr?.let { File(it) }
+        val availability = harness.getSelectedModelAvailability()
+        val model = availability.model
 
-        val ggufMissing = !ggufFile.exists()
-        val mmprojMissing = !model.isTextOnly && (mmprojFile == null || !mmprojFile.exists())
-
-        if (ggufMissing || mmprojMissing) {
+        if (availability.ggufMissing || availability.supportArtifactMissing) {
             promptDownloadModels(
-                ggufMissing = ggufMissing,
-                mmprojMissing = mmprojMissing
+                ggufMissing = availability.ggufMissing,
+                mmprojMissing = !model.isTextOnly && availability.supportArtifactMissing
             )
             return
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val mmprojArg = if (mmprojFile != null && mmprojFile.exists()) mmprojFile.absolutePath else null
-                engine.loadModel(ggufFile.absolutePath, mmprojArg)
+                harness.loadSelectedModel()
                 loadedModelId = model.id
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading model", e)
-                engine.resetToInitialized()
+                harness.resetToInitialized()
                 hasAutoLoaded = false
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, getString(R.string.toast_model_load_failed, e.message), Toast.LENGTH_LONG).show()
@@ -467,7 +452,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                engine.prefillImage(imageBytes)
+                harness.prefillImage(imageBytes)
 
                 isImagePrefilled = true
 
@@ -502,7 +487,7 @@ class MainActivity : AppCompatActivity() {
      * (see prepare() in llama_jni.cpp).
      */
     private fun handleSelectedVideo(uri: Uri) {
-        if (!engine.isVideoUnderstandingSupported) {
+        if (!harness.isVideoUnderstandingSupported) {
             Toast.makeText(this,
                 R.string.video_only_v46,
                 Toast.LENGTH_LONG).show()
@@ -533,7 +518,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                engine.prefillVideoFrames(extracted.frames) { current, total ->
+                harness.prefillVideoFrames(extracted.frames) { current, total ->
                     withContext(Dispatchers.Main) {
                         val index = messages.indexOfFirst { it.id == msgId }
                         if (index >= 0) {
@@ -629,7 +614,7 @@ class MainActivity : AppCompatActivity() {
 
         generationJob = lifecycleScope.launch(Dispatchers.Default) {
             val fullResponse = StringBuilder()
-            engine.sendUserPrompt(userMsg)
+            harness.sendUserPrompt(userMsg)
                 .onCompletion {
                     withContext(Dispatchers.Main) {
                         val index = messages.indexOfFirst { it.id == aiMsgId }
@@ -696,14 +681,13 @@ class MainActivity : AppCompatActivity() {
             finish()
             return
         }
-        if (!::engine.isInitialized) return
-        val selectedId = LlamaEngine.getSelectedModel(applicationContext).id
+        val selectedId = harness.getSelectedModel().id
 
         if (loadedModelId != null && loadedModelId != selectedId) {
             loadedModelId = null
             hasAutoLoaded = false
             reloadAfterModelSwitch()
-        } else if (LlamaEngine.consumeModelSwitched(applicationContext)) {
+        } else if (harness.consumeModelSwitched()) {
             loadedModelId = selectedId
             clearChatUI()
             updateUIForModelType()
@@ -714,8 +698,8 @@ class MainActivity : AppCompatActivity() {
         enableInput(false)
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                if (engine.state.value is LlamaState.ModelReady) {
-                    engine.unloadModel()
+                if (harness.state.value is LlamaState.ModelReady) {
+                    harness.unloadModel()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error unloading during model switch", e)
@@ -733,8 +717,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        if (isFinishing && !isLocaleRestart && ::engine.isInitialized) {
-            engine.destroy()
+        if (isFinishing && !isLocaleRestart) {
+            harness.destroy()
         }
         super.onDestroy()
     }

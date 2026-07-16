@@ -20,10 +20,10 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.LinearProgressIndicator
+import com.example.minicpm_v_demo.harness.HarnessFacade
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class ModelManagerActivity : AppCompatActivity() {
 
@@ -35,7 +35,7 @@ class ModelManagerActivity : AppCompatActivity() {
     private lateinit var recyclerModels: RecyclerView
     private lateinit var tvLanguageValue: TextView
 
-    private lateinit var engine: LlamaEngine
+    private lateinit var harness: HarnessFacade
     private lateinit var modelAdapter: ModelAdapter
 
     // Android 13+: POST_NOTIFICATIONS is a runtime permission. We need it
@@ -71,7 +71,7 @@ class ModelManagerActivity : AppCompatActivity() {
         recyclerModels = findViewById(R.id.recycler_models)
         tvLanguageValue = findViewById(R.id.tv_language_value)
 
-        engine = LlamaEngine.getInstance(applicationContext)
+        harness = HarnessFacade.getInstance(applicationContext)
 
         setupModelList()
         updateLoadButtonState()
@@ -86,17 +86,17 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     private fun setupModelList() {
-        val selectedModel = LlamaEngine.getSelectedModel(this)
+        val selectedModel = harness.getSelectedModel()
         modelAdapter = ModelAdapter(
             models = ModelInfo.AVAILABLE_MODELS,
             selectedModelId = selectedModel.id,
             onModelSelected = { model ->
-                val previousModelId = LlamaEngine.getSelectedModel(this).id
-                LlamaEngine.setSelectedModel(this, model.id)
+                val previousModelId = harness.getSelectedModel().id
+                harness.setSelectedModel(model.id)
                 updateLoadButtonState()
 
                 if (previousModelId != model.id) {
-                    val wasLoaded = engine.state.value is LlamaState.ModelReady
+                    val wasLoaded = harness.state.value is LlamaState.ModelReady
                     if (wasLoaded) {
                         reloadSelectedModel()
                     } else {
@@ -111,13 +111,12 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     private fun reloadSelectedModel() {
-        val model = LlamaEngine.getSelectedModel(this)
-        val modelPath = LlamaEngine.modelPath(applicationContext)
+        val model = harness.getSelectedModel()
 
-        if (!File(modelPath).exists()) {
+        if (!harness.isSelectedModelDownloaded()) {
             tvModelStatus.text = getString(R.string.switched_to_download, model.displayName)
             lifecycleScope.launch(Dispatchers.IO) {
-                try { engine.unloadModel() } catch (_: Exception) {}
+                try { harness.unloadModel() } catch (_: Exception) {}
                 withContext(Dispatchers.Main) { updateLoadButtonState() }
             }
             return
@@ -129,18 +128,16 @@ class ModelManagerActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                engine.unloadModel()
-                val mmprojPath = LlamaEngine.mmprojPath(applicationContext)
-                val mmprojArg = mmprojPath?.let { if (File(it).exists()) it else null }
-                engine.loadModel(modelPath, mmprojArg)
-                LlamaEngine.markModelSwitched(applicationContext)
+                harness.unloadModel()
+                harness.loadSelectedModel()
+                harness.markModelSwitched()
                 withContext(Dispatchers.Main) {
                     updateLoadButtonState()
                     Toast.makeText(this@ModelManagerActivity, getString(R.string.toast_load_success, model.displayName), Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error reloading model", e)
-                engine.resetToInitialized()
+                harness.resetToInitialized()
                 withContext(Dispatchers.Main) {
                     tvModelStatus.text = getString(R.string.toast_load_failed, e.message)
                     updateLoadButtonState()
@@ -151,7 +148,7 @@ class ModelManagerActivity : AppCompatActivity() {
 
     private fun observeEngineState() {
         lifecycleScope.launch {
-            engine.state.collect { state ->
+            harness.state.collect { state ->
                 when (state) {
                     is LlamaState.Uninitialized -> {
                         tvModelStatus.text = getString(R.string.status_uninitialized)
@@ -198,8 +195,8 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     private fun updateLoadButtonState() {
-        val exists = LlamaEngine.modelsExist(this)
-        val isReady = engine.state.value is LlamaState.ModelReady
+        val exists = harness.isSelectedModelDownloaded()
+        val isReady = harness.state.value is LlamaState.ModelReady
         btnLoadModel.isEnabled = exists
         btnDeleteModel.visibility = if (exists) View.VISIBLE else View.GONE
         btnLoadModel.text = when {
@@ -214,7 +211,7 @@ class ModelManagerActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.toast_downloading, Toast.LENGTH_SHORT).show()
             return
         }
-        if (LlamaEngine.modelsExist(this)) {
+        if (harness.isSelectedModelDownloaded()) {
             Toast.makeText(this, R.string.toast_already_downloaded, Toast.LENGTH_SHORT).show()
             return
         }
@@ -242,7 +239,7 @@ class ModelManagerActivity : AppCompatActivity() {
         progressDownload.visibility = View.VISIBLE
         tvModelStatus.text = getString(R.string.status_downloading)
 
-        ModelDownloadService.start(applicationContext)
+        harness.startDownloadService()
     }
 
     /**
@@ -302,24 +299,21 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     private fun loadSelectedModel() {
-        val model = LlamaEngine.getSelectedModel(applicationContext)
+        val model = harness.getSelectedModel()
         // TTS models are loaded on-demand by TtsActivity, not via LlamaEngine.
         if (model.isTts) {
-            LlamaEngine.markModelSwitched(applicationContext)
+            harness.markModelSwitched()
             finish() // return to parent; MainActivity will redirect
             return
         }
 
-        val currentState = engine.state.value
+        val currentState = harness.state.value
         if (currentState is LlamaState.LoadingModel) {
             Toast.makeText(this, R.string.toast_already_loading, Toast.LENGTH_SHORT).show()
             return
         }
 
-        val modelPath = LlamaEngine.modelPath(applicationContext)
-        val mmprojPath = LlamaEngine.mmprojPath(applicationContext)
-
-        if (!File(modelPath).exists()) {
+        if (!harness.isSelectedModelDownloaded()) {
             Toast.makeText(this, R.string.toast_model_not_found, Toast.LENGTH_LONG).show()
             return
         }
@@ -333,13 +327,10 @@ class ModelManagerActivity : AppCompatActivity() {
             try {
                 if (isReload) {
                     Log.i(TAG, "Unloading model for reload...")
-                    engine.unloadModel()
+                    harness.unloadModel()
                 }
 
-                val mmprojArg = mmprojPath?.let { path ->
-                    if (File(path).exists()) path else null
-                }
-                engine.loadModel(modelPath, mmprojArg)
+                harness.loadSelectedModel()
                 // No default system prompt: aligned with iOS opt-r1. See
                 // MainActivity.clearChat() for the rationale.
 
@@ -351,7 +342,7 @@ class ModelManagerActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading model", e)
-                engine.resetToInitialized()
+                harness.resetToInitialized()
                 withContext(Dispatchers.Main) {
                     tvModelStatus.text = getString(R.string.toast_load_failed, e.message)
                     btnLoadModel.isEnabled = true
@@ -363,13 +354,8 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     private fun confirmDeleteModel() {
-        val model = LlamaEngine.getSelectedModel(this)
-        val fileList = buildString {
-            append("• ${model.ggufFileName}")
-            if (model.mmprojFileName != null) {
-                append("\n• ${model.mmprojFileName}")
-            }
-        }
+        val model = harness.getSelectedModel()
+        val fileList = harness.selectedModelArtifactNames().joinToString(separator = "\n") { "• $it" }
         AlertDialog.Builder(this)
             .setTitle(R.string.delete_dialog_title)
             .setMessage(getString(R.string.delete_dialog_message, model.displayName, fileList))
@@ -381,15 +367,7 @@ class ModelManagerActivity : AppCompatActivity() {
     private fun deleteModelFiles() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val modelPath = LlamaEngine.modelPath(applicationContext)
-                val mmprojPath = LlamaEngine.mmprojPath(applicationContext)
-
-                var deleted = false
-                File(modelPath).let { if (it.exists()) { it.delete(); deleted = true } }
-                mmprojPath?.let { File(it) }?.let { if (it.exists()) { it.delete(); deleted = true } }
-                // Also delete the acoustic GGUF for TTS models
-                val acousticPath = LlamaEngine.acousticPath(applicationContext)
-                acousticPath?.let { File(it) }?.let { if (it.exists()) { it.delete(); deleted = true } }
+                val deleted = harness.deleteSelectedModelFiles()
 
                 withContext(Dispatchers.Main) {
                     updateLoadButtonState()
