@@ -1,6 +1,6 @@
 # MiniCPM-V-demo-Android
 
-`MiniCPM-V-demo-Android` 是一个基于 Android 的本地大模型演示项目，聚焦在端侧模型加载、推理与交互体验。项目当前以 `MiniCPM-V` 系列能力为主，结合 Kotlin、JNI 与 Native 推理后端，提供文本、多模态图片理解、部分视频理解与 TTS 相关能力的验证入口。当前代码已经完成 Harness 接入的阶段一，并进入阶段二开头：页面主链路已切到 Harness，模型存储与下载职责开始从 `LlamaEngine` 中拆出。
+`MiniCPM-V-demo-Android` 是一个基于 Android 的本地大模型演示项目，聚焦在端侧模型加载、推理与交互体验。项目当前以 `MiniCPM-V` 系列能力为主，结合 Kotlin、JNI 与 Native 推理后端，提供文本、多模态图片理解、部分视频理解与 TTS 相关能力的验证入口。当前代码已经完成 Harness 接入的阶段一，完成阶段二的首轮职责拆分，并落地阶段三的模型注册表入口：页面主链路已切到 Harness，模型存储与下载职责开始从 `LlamaEngine` 中拆出，模型清单和通用 spec 已由 `HarnessModelRegistry` 统一管理。
 
 ## 项目概览
 
@@ -37,6 +37,7 @@
 │   │   └── harness/
 │   │       ├── HarnessFacade.kt
 │   │       ├── HarnessBackend.kt
+│   │       ├── HarnessModelRegistry.kt
 │   │       ├── HarnessModelSpec.kt
 │   │       ├── LlamaBackendAdapter.kt
 │   │       ├── LlamaModelStore.kt
@@ -63,6 +64,7 @@
 ```text
 UI(Activity)
   -> HarnessFacade
+      -> HarnessModelRegistry
       -> LlamaModelStore
       -> LlamaDownloadManager
       -> LlamaBackendAdapter
@@ -102,6 +104,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - [app/src/main/AndroidManifest.xml](app/src/main/AndroidManifest.xml)：应用组件、权限与前台下载服务配置
 - [app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt](app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)：模型加载、推理、预填充与运行时主逻辑
 - [app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt](app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)：页面访问 Harness 的统一入口
+- [app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelRegistry.kt](app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelRegistry.kt)：当前模型清单、通用 spec 与兼容映射入口
 - [app/src/main/java/com/example/minicpm_v_demo/harness/LlamaModelStore.kt](app/src/main/java/com/example/minicpm_v_demo/harness/LlamaModelStore.kt)：模型选择、路径、文件存在性与删除职责
 - [app/src/main/java/com/example/minicpm_v_demo/harness/LlamaDownloadManager.kt](app/src/main/java/com/example/minicpm_v_demo/harness/LlamaDownloadManager.kt)：下载执行入口与前台下载服务适配
 - [app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt](app/src/main/java/com/example/minicpm_v_demo/ModelDownloadService.kt)：后台模型下载服务
@@ -123,5 +126,5 @@ app/build/outputs/apk/debug/app-debug.apk
 - 模型下载来源与目录规则
 - 真机/模拟器运行步骤
 - 常见问题排查
-- Harness 阶段二/三后的结构变化
+- Harness 阶段四前的进一步结构变化
 - Harness 与 Native 推理链路说明

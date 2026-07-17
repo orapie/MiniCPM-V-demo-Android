@@ -13,9 +13,8 @@ data class HarnessModelAvailability(
 
 data class LlamaModelFiles(
     val model: ModelInfo,
-    val ggufFile: File,
-    val mmprojFile: File?,
-    val acousticFile: File?
+    val spec: HarnessModelSpec,
+    val artifactFiles: Map<String, File>
 )
 
 class LlamaModelStore(private val context: Context) {
@@ -38,42 +37,42 @@ class LlamaModelStore(private val context: Context) {
 
     fun getImageMaxSliceNums(): Int = LlamaEngine.getImageMaxSliceNums(context)
 
-    fun getSelectedModelSpec(): HarnessModelSpec = getSelectedModel().toHarnessSpec()
+    fun getSelectedModelSpec(): HarnessModelSpec =
+        HarnessModelRegistry.findSpec(getSelectedModel().id) ?: HarnessModelRegistry.defaultEntry.spec
 
     fun getSelectedModelFiles(): LlamaModelFiles {
         val model = getSelectedModel()
+        val spec = getSelectedModelSpec()
+        val artifactFiles = buildMap {
+            put("llm", File(LlamaEngine.modelPath(context)))
+            LlamaEngine.mmprojPath(context)?.let { put("vision_projector", File(it)) }
+            LlamaEngine.acousticPath(context)?.let { put("acoustic", File(it)) }
+        }
         return LlamaModelFiles(
             model = model,
-            ggufFile = File(LlamaEngine.modelPath(context)),
-            mmprojFile = LlamaEngine.mmprojPath(context)?.let(::File),
-            acousticFile = LlamaEngine.acousticPath(context)?.let(::File)
+            spec = spec,
+            artifactFiles = artifactFiles
         )
     }
 
     fun getSelectedModelAvailability(): HarnessModelAvailability {
         val files = getSelectedModelFiles()
-        val supportArtifactMissing = when {
-            files.model.isTextOnly -> false
-            files.model.isTts -> files.acousticFile?.exists() != true
-            else -> files.mmprojFile?.exists() != true
-        }
+        val ggufMissing = files.artifactFiles["llm"]?.exists() != true
+        val supportArtifactMissing = files.spec.artifacts
+            .filter { it.required && it.id != "llm" }
+            .any { artifact -> files.artifactFiles[artifact.id]?.exists() != true }
         return HarnessModelAvailability(
             model = files.model,
-            ggufMissing = !files.ggufFile.exists(),
+            ggufMissing = ggufMissing,
             supportArtifactMissing = supportArtifactMissing
         )
     }
 
     fun isSelectedModelDownloaded(): Boolean {
         val files = getSelectedModelFiles()
-        val requiredArtifacts = getSelectedModelSpec().artifacts.filter { it.required }
+        val requiredArtifacts = files.spec.artifacts.filter { it.required }
         return requiredArtifacts.all { artifact ->
-            when (artifact.id) {
-                "llm" -> files.ggufFile.exists()
-                "vision_projector" -> files.mmprojFile?.exists() == true
-                "acoustic" -> files.acousticFile?.exists() == true
-                else -> false
-            }
+            files.artifactFiles[artifact.id]?.exists() == true
         }
     }
 
@@ -83,9 +82,11 @@ class LlamaModelStore(private val context: Context) {
     fun deleteSelectedModelFiles(): Boolean {
         val files = getSelectedModelFiles()
         var deleted = false
-        if (files.ggufFile.exists() && files.ggufFile.delete()) deleted = true
-        if (files.mmprojFile?.exists() == true && files.mmprojFile.delete()) deleted = true
-        if (files.acousticFile?.exists() == true && files.acousticFile.delete()) deleted = true
+        for (file in files.artifactFiles.values) {
+            if (file.exists() && file.delete()) {
+                deleted = true
+            }
+        }
         return deleted
     }
 }

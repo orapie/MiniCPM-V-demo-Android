@@ -3,6 +3,7 @@ package com.example.minicpm_v_demo
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.example.minicpm_v_demo.harness.HarnessModelRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -94,8 +95,9 @@ class LlamaEngine private constructor(
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         fun getSelectedModel(context: Context): ModelInfo {
-            val modelId = prefs(context).getString(KEY_SELECTED_MODEL, ModelInfo.DEFAULT_MODEL.id) ?: ModelInfo.DEFAULT_MODEL.id
-            return ModelInfo.AVAILABLE_MODELS.find { it.id == modelId } ?: ModelInfo.DEFAULT_MODEL
+            val defaultModelId = HarnessModelRegistry.defaultEntry.spec.id
+            val modelId = prefs(context).getString(KEY_SELECTED_MODEL, defaultModelId) ?: defaultModelId
+            return HarnessModelRegistry.findLegacyModel(modelId) ?: HarnessModelRegistry.defaultEntry.legacyModelInfo
         }
 
         fun setSelectedModel(context: Context, modelId: String) {
@@ -233,7 +235,7 @@ class LlamaEngine private constructor(
             val rootDir = File(modelDir(context))
             if (!rootDir.exists()) return
 
-            for (model in ModelInfo.AVAILABLE_MODELS) {
+            for (model in HarnessModelRegistry.availableModelInfos()) {
                 val targetDir = File(rootDir, model.id)
                 val flatGguf = File(rootDir, model.ggufFileName)
                 val flatMmproj = model.mmprojFileName?.let { File(rootDir, it) }

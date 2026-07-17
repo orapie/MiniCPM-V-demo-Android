@@ -80,11 +80,9 @@
 - 禁用视频路径
 - 保留纯文本对话路径
 
-### 3.3 通过 HarnessModelRegistry 接管模型注册
+### 3.3 通过 HarnessModelRegistry 继续接管模型注册
 
-当前模型列表仍然直接放在 `ModelInfo.AVAILABLE_MODELS` 中。要让轻量模型以 Harness 方式稳定接入，建议下一步新增：
-
-- `HarnessModelRegistry`
+当前项目已经新增 `HarnessModelRegistry`，但它还没有成为所有模型逻辑的唯一事实来源。要让轻量模型以 Harness 方式稳定接入，下一步应继续强化它：
 
 职责：
 
@@ -93,7 +91,7 @@
 - 暴露每个模型的 artifact 清单
 - 暴露推荐运行参数
 
-此时旧 `ModelInfo` 可以作为兼容层保留，但 UI 和下载逻辑应逐步从 `ModelInfo` 转向 `HarnessModelRegistry`。
+此时旧 `ModelInfo` 可以作为兼容层保留，但 UI、下载和运行时逻辑应逐步从 `ModelInfo` 转向 `HarnessModelRegistry`。
 
 ### 3.4 为轻量模型增加 runtime hints
 
@@ -135,11 +133,15 @@
 
 - 让 `Llama 3.2 1B`、`Qwen 0.6B/0.8B` 这类模型通过 Harness 被识别为标准 text-only 模型
 
-建议修改：
+当前状态：
 
-- 增加 `HarnessModelRegistry`
-- 为 `HarnessModelSpec` 增加 `runtimeHints`
+- `HarnessModelRegistry` 已存在
+- `HarnessModelSpec` 已包含 `runtimeHints`
+
+接下来建议：
+
 - UI 只根据 `capabilities` 决定功能可见性
+- 下载和运行时继续从 registry 读取模型信息
 
 ### 阶段 B：下载逻辑泛化
 

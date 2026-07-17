@@ -39,6 +39,10 @@ class HarnessFacade private constructor(
 
     fun getSelectedModelSpec(): HarnessModelSpec = modelStore.getSelectedModelSpec()
 
+    fun availableModels(): List<ModelInfo> = HarnessModelRegistry.availableModelInfos()
+
+    fun availableModelSpecs(): List<HarnessModelSpec> = HarnessModelRegistry.availableSpecs()
+
     fun setSelectedModel(modelId: String) {
         modelStore.setSelectedModel(modelId)
     }
@@ -62,9 +66,11 @@ class HarnessFacade private constructor(
 
     suspend fun loadSelectedModel() {
         val files = modelStore.getSelectedModelFiles()
-        require(files.ggufFile.exists()) { "File not found: ${files.ggufFile.absolutePath}" }
-        val mmprojArg = files.mmprojFile?.takeIf { it.exists() }?.absolutePath
-        backend.loadModel(files.ggufFile.absolutePath, mmprojArg)
+        val llmFile = files.artifactFiles["llm"]
+            ?: throw IllegalStateException("Missing llm artifact path for ${files.model.id}")
+        require(llmFile.exists()) { "File not found: ${llmFile.absolutePath}" }
+        val mmprojArg = files.artifactFiles["vision_projector"]?.takeIf { it.exists() }?.absolutePath
+        backend.loadModel(llmFile.absolutePath, mmprojArg)
     }
 
     suspend fun unloadModel() {

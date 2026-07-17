@@ -133,6 +133,7 @@
 ### 4.6 当前新增的 Harness 层
 
 - [HarnessFacade.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
+- [HarnessModelRegistry.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelRegistry.kt)
 - [HarnessBackend.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessBackend.kt)
 - [LlamaBackendAdapter.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/LlamaBackendAdapter.kt)
 - [HarnessModelSpec.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelSpec.kt)
@@ -148,6 +149,7 @@
 ```text
 MainActivity / ModelManagerActivity
     -> HarnessFacade
+        -> HarnessModelRegistry
         -> LlamaModelStore
         -> LlamaDownloadManager
         -> LlamaBackendAdapter
@@ -169,6 +171,7 @@ ModelManagerActivity
 所以你可以这样理解：
 
 - 当前 Harness 已经接到了“页面入口”这一层
+- 模型清单与通用模型 spec 已经有了独立注册表入口
 - 模型存储和下载职责已经开始从 `LlamaEngine` 中拆出
 - 但核心运行时职责仍主要留在 `LlamaEngine`
 
@@ -210,6 +213,7 @@ Harness 更准确的角色是：
 
 目前这次最小改动里，Harness 已经具备这些能力：
 
+- 统一提供模型注册表与通用模型 spec
 - 统一获取当前模型
 - 统一获取模型 capability
 - 统一判断当前模型文件是否完整
@@ -221,7 +225,7 @@ Harness 更准确的角色是：
 - 统一启动下载服务
 - 统一模型路径、文件存在性与 artifact 名单访问
 
-简单说，**页面主链路已经切到 Harness，阶段二也已经开始**。
+简单说，**页面主链路已经切到 Harness，阶段二和阶段三都已经开始**。
 
 ## 9. 当前 Harness 还没有做什么
 
@@ -229,14 +233,13 @@ Harness 更准确的角色是：
 
 目前还没有完成的点包括：
 
-- 没有真正独立的 `HarnessModelRegistry`
 - 还没有独立的 `LlamaRuntime`
 - 还没有把 `LlamaEngine` 彻底拆成 store / download / runtime 三部分
 - 没有把 Android 依赖和平台无关核心彻底分开
 - 没有把 TTS 路径完整并入 Harness
 - 没有形成可直接复用的跨平台 SDK API
 
-所以现在的 Harness 还不是“完整 SDK 内核”，而是“阶段一完成、阶段二开头已落地的架构边界”。
+所以现在的 Harness 还不是“完整 SDK 内核”，而是“阶段一完成、阶段二首轮已落地、阶段三已开始的架构边界”。
 
 ## 10. 你可以怎样理解“最小 Harness”
 
@@ -285,17 +288,19 @@ Harness 更准确的角色是：
 
 为了最快建立认知，建议按这个顺序读：
 
-1. [ModelInfo.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)
-   - 先看模型有哪些、哪些是 text-only、哪些是 vision、哪些是 tts
-2. [HarnessFacade.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
+1. [HarnessModelRegistry.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessModelRegistry.kt)
+   - 先看当前模型清单是如何映射成通用 Harness 模型定义的
+2. [ModelInfo.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelInfo.kt)
+   - 再看兼容层里保留了哪些原始模型元数据
+3. [HarnessFacade.kt](../app/src/main/java/com/example/minicpm_v_demo/harness/HarnessFacade.kt)
    - 看页面现在通过什么入口访问能力
-3. [MainActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/MainActivity.kt)
+4. [MainActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/MainActivity.kt)
    - 看聊天主链路
-4. [ModelManagerActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelManagerActivity.kt)
+5. [ModelManagerActivity.kt](../app/src/main/java/com/example/minicpm_v_demo/ModelManagerActivity.kt)
    - 看模型下载、加载、切换主链路
-5. [LlamaEngine.kt](../app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)
-   - 看当前实际业务逻辑集中在哪里
-6. [llama_jni.cpp](../app/src/main/cpp/llama_jni.cpp)
+6. [LlamaEngine.kt](../app/src/main/java/com/example/minicpm_v_demo/LlamaEngine.kt)
+   - 看当前实际运行时逻辑集中在哪里
+7. [llama_jni.cpp](../app/src/main/cpp/llama_jni.cpp)
    - 最后再看 native 细节
 
 这个顺序比一开始就冲进 JNI 更容易建立全局认知。

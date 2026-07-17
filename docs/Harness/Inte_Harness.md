@@ -27,6 +27,7 @@
 
 - 阶段一已完成
 - 阶段二已开始，但尚未完成
+- 阶段三已开始，但尚未完成
 
 已完成的阶段二内容：
 
@@ -40,6 +41,20 @@
 - `LlamaRuntime` 还未从 `LlamaEngine` 中拆出
 - `LlamaBackendAdapter` 仍直接包裹 `LlamaEngine`
 - 运行时职责仍主要集中在 `LlamaEngine.kt`
+
+已完成的阶段三内容：
+
+- 新增 `HarnessModelRegistry`
+- `HarnessModelSpec` 已扩展为包含 `family`、`artifacts`、`downloadSources`、`runtimeHints`
+- `LlamaModelStore` 已开始按 registry + artifact 列表判断模型文件完整性
+- `ModelManagerActivity` 已开始通过 registry 暴露的模型列表工作
+- `LlamaEngine.getSelectedModel(...)` 已开始通过 registry 解析模型 ID
+
+尚未完成的阶段三内容：
+
+- `ModelInfo` 仍然是 registry 的底层来源，而不是纯兼容层
+- 下载执行仍主要依赖旧 `ModelInfo` 字段和 `LlamaEngine.downloadModels(...)`
+- `HarnessModelRegistry` 还没有成为所有模型相关逻辑的唯一事实来源
 
 ## 1. 目标与前提
 

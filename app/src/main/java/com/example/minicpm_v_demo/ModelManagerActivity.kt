@@ -88,7 +88,7 @@ class ModelManagerActivity : AppCompatActivity() {
     private fun setupModelList() {
         val selectedModel = harness.getSelectedModel()
         modelAdapter = ModelAdapter(
-            models = ModelInfo.AVAILABLE_MODELS,
+            models = harness.availableModels(),
             selectedModelId = selectedModel.id,
             onModelSelected = { model ->
                 val previousModelId = harness.getSelectedModel().id

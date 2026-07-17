@@ -2,7 +2,7 @@
 
 ## 本次修改目标
 
-本文记录 Harness 相关改动的当前状态。截止 2026 年 7 月 17 日，项目已经完成 Harness 接入的阶段一，并开始落地阶段二。
+本文记录 Harness 相关改动的当前状态。截止 2026 年 7 月 17 日，项目已经完成 Harness 接入的阶段一，完成阶段二的首轮职责拆分，并落地阶段三的模型注册表入口。
 
 最初目标是在不重写现有 `LlamaEngine + JNI + llama.cpp-omni` 链路的前提下，以最小改动方式把 Harness 接入当前项目，使其先承担统一编排层/适配层角色。
 
@@ -67,6 +67,25 @@
   - 不再直接调用 `LlamaEngine.downloadModels(...)`
   - 改为通过 `LlamaDownloadManager` 执行下载
 
+### 5. 阶段三：模型定义泛化已开始落地
+
+新增文件：
+
+- `HarnessModelRegistry.kt`
+  - 作为当前模型清单与 Harness 通用 spec 的统一入口
+
+已完成的阶段三内容：
+
+- `HarnessModelSpec` 已扩展为通用模型结构，包含：
+  - `family`
+  - `artifacts`
+  - `downloadSources`
+  - `runtimeHints`
+- `ModelInfo.toHarnessSpec()` 不再只是最小映射，而是会生成更完整的通用 spec
+- `ModelManagerActivity.kt` 已开始通过 `HarnessModelRegistry` 暴露的模型列表工作
+- `LlamaModelStore.kt` 已改为按 registry + artifact 列表判断模型文件完整性
+- `LlamaEngine.getSelectedModel(...)` 已开始通过 `HarnessModelRegistry` 做模型 ID 解析
+
 ## 当前刻意没有修改的部分
 
 为了保持风险可控，当前仍然没有改以下部分：
@@ -130,7 +149,7 @@
 
 ## 结论
 
-当前修改完成的是“阶段一已完成、阶段二已开始”的 Harness 接入，不是“完整 SDK 化重构”。
+当前修改完成的是“阶段一已完成、阶段二首轮已落地、阶段三已开始”的 Harness 接入，不是“完整 SDK 化重构”。
 
 当前项目已经具备：
 
@@ -139,9 +158,11 @@
 - Activity 对 Harness 的主链路切换
 - 独立的模型存储职责入口
 - 独立的下载职责入口
+- 独立的模型注册表入口
+- 通用的 Harness 模型 spec 结构
 
 后续如果继续演进，建议下一步优先做：
 
 1. 把 `LlamaEngine` 中的运行时职责继续拆分为独立 `LlamaRuntime`
-2. 新增 `HarnessModelRegistry`，推动阶段三
+2. 继续把 UI / 下载 / 运行时对 registry 的使用彻底统一
 3. 把 TTS 路径也逐步并入 Harness 能力模型
