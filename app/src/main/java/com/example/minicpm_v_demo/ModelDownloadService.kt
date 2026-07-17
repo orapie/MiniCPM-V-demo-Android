@@ -14,6 +14,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.example.minicpm_v_demo.harness.LlamaDownloadManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,12 +25,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that runs [LlamaEngine.downloadModels] outside the
+ * Foreground service that runs the selected model download outside the
  * Activity's lifecycle. Survives:
  *   - user switching to another app
  *   - the screen turning off (Doze still throttles network somewhat, but the
  *     PARTIAL_WAKE_LOCK keeps the CPU awake long enough to keep the socket
- *     alive; combined with the HTTP Range resume in LlamaEngine that's
+ *     alive; combined with the HTTP Range resume in the downloader that's
  *     enough to make multi-GB downloads reliable)
  *   - Activity being destroyed (we're a service, not bound to it)
  *
@@ -42,11 +43,13 @@ class ModelDownloadService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var downloadJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var downloadManager: LlamaDownloadManager
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        downloadManager = LlamaDownloadManager(applicationContext)
         ensureNotificationChannel(this)
     }
 
@@ -74,7 +77,7 @@ class ModelDownloadService : Service() {
 
         downloadJob = scope.launch {
             try {
-                LlamaEngine.downloadModels(applicationContext) { message ->
+                downloadManager.downloadSelectedModel { message ->
                     ModelDownloadController.publishProgress(message)
                     updateNotification(message)
                 }

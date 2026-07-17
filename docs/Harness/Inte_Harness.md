@@ -21,6 +21,26 @@
 
 一句话概括：Harness 在这里应该是“编排层/适配层”，不是“替代引擎层”。
 
+## 当前进度
+
+截至 2026 年 7 月 17 日，当前仓库的实际状态是：
+
+- 阶段一已完成
+- 阶段二已开始，但尚未完成
+
+已完成的阶段二内容：
+
+- 新增 `LlamaModelStore`
+- 新增 `LlamaDownloadManager`
+- `HarnessFacade` 已开始把模型存储和下载职责委托给这两层
+- `ModelDownloadService` 已改为通过 `LlamaDownloadManager` 执行下载
+
+尚未完成的阶段二内容：
+
+- `LlamaRuntime` 还未从 `LlamaEngine` 中拆出
+- `LlamaBackendAdapter` 仍直接包裹 `LlamaEngine`
+- 运行时职责仍主要集中在 `LlamaEngine.kt`
+
 ## 1. 目标与前提
 
 本文基于以下假设来设计方案：

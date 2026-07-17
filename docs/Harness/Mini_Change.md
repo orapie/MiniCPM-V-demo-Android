@@ -1,12 +1,14 @@
-# Harness 最小改动接入记录
+# Harness 改动记录
 
 ## 本次修改目标
 
-在不重写现有 `LlamaEngine + JNI + llama.cpp-omni` 链路的前提下，以最小改动方式把 Harness 接入当前项目，使其先承担统一编排层/适配层角色。
+本文记录 Harness 相关改动的当前状态。截止 2026 年 7 月 17 日，项目已经完成 Harness 接入的阶段一，并开始落地阶段二。
+
+最初目标是在不重写现有 `LlamaEngine + JNI + llama.cpp-omni` 链路的前提下，以最小改动方式把 Harness 接入当前项目，使其先承担统一编排层/适配层角色。
 
 ## 实际修改内容
 
-### 1. 新增 Harness 抽象层
+### 1. 阶段一：新增 Harness 抽象层
 
 新增目录：
 
@@ -24,7 +26,7 @@
 - `HarnessFacade.kt`
   - 对 Activity 提供统一入口
 
-### 2. Activity 层切换到 HarnessFacade
+### 2. 阶段一：Activity 层切换到 HarnessFacade
 
 修改文件：
 
@@ -37,7 +39,7 @@
 - 保留现有 `LlamaState` 状态流，避免一次性大改 UI 状态机
 - 模型加载、卸载、会话清理、图片预填充、视频预填充、文本生成、模型删除、模型切换等动作，统一从 Harness 层进入
 
-### 3. 文档结构调整
+### 3. 阶段一：文档结构调整
 
 新增目录：
 
@@ -48,9 +50,26 @@
 - `Inte_Harness.md` 已移动到 `docs/Harness/Inte_Harness.md`
 - 本文档新增为 `docs/Harness/Mini_Change.md`
 
-## 本次刻意没有修改的部分
+### 4. 阶段二：已开始拆分的职责
 
-为了满足“最小改动”原则，本次没有改以下部分：
+新增文件：
+
+- `LlamaModelStore.kt`
+  - 负责当前模型选择、路径、文件存在性判断、artifact 名单、删除与切换标记
+- `LlamaDownloadManager.kt`
+  - 负责下载执行入口以及前台下载服务适配
+
+对应调整：
+
+- `HarnessFacade.kt`
+  - 改为委托 `LlamaModelStore` 和 `LlamaDownloadManager`
+- `ModelDownloadService.kt`
+  - 不再直接调用 `LlamaEngine.downloadModels(...)`
+  - 改为通过 `LlamaDownloadManager` 执行下载
+
+## 当前刻意没有修改的部分
+
+为了保持风险可控，当前仍然没有改以下部分：
 
 - `LlamaEngine.kt` 的核心实现逻辑
 - `ModelDownloadService.kt` 的前台服务实现
@@ -61,7 +80,7 @@
 说明：
 
 - TTS 仍然沿用当前项目的原路径
-- 下载服务仍然复用原有服务，只是调用入口可由 HarnessFacade 统一转发
+- 下载服务仍然复用原有前台服务形态，只是下载执行入口开始由 Harness 层承接
 - Native 推理链路不变，因此本次风险主要集中在 Kotlin 层边界调整
 
 ## 最终效果
@@ -70,7 +89,7 @@
 
 - UI 层不再直接依赖 `LlamaEngine` 作为主调用入口
 - 当前本地 llama backend 被包装成 `LlamaBackendAdapter`
-- 项目里已经形成最小 Harness 外壳，后续可继续接入其他 backend，而不需要先改 Activity
+- 项目里已经形成 Harness 外壳，并开始把模型存储与下载职责从 `LlamaEngine` 拆出
 
 ### App 使用层面的体现
 
@@ -80,7 +99,7 @@
 - 模型切换、加载、会话生成、图片预填充等动作不再各自直连底层实现
 - 后续如果替换 backend 或增加新模型运行时，优先改 Harness 层，不必先改页面逻辑
 
-### 当前 Harness 已覆盖的最小能力
+### 当前 Harness 已覆盖的能力
 
 - 统一获取当前模型与模型能力
 - 统一判断模型文件是否完整
@@ -90,6 +109,7 @@
 - 统一图片/视频预填充
 - 统一删除当前模型文件
 - 统一启动模型下载服务
+- 统一模型路径、文件存在性与 artifact 名单访问
 
 ## 验证结果
 
@@ -110,16 +130,18 @@
 
 ## 结论
 
-这次修改完成的是“最小 Harness 接入”，不是“完整 SDK 化重构”。
+当前修改完成的是“阶段一已完成、阶段二已开始”的 Harness 接入，不是“完整 SDK 化重构”。
 
 当前项目已经具备：
 
 - Harness 抽象入口
 - Llama backend 适配器
 - Activity 对 Harness 的主链路切换
+- 独立的模型存储职责入口
+- 独立的下载职责入口
 
 后续如果继续演进，建议下一步优先做：
 
-1. 把 `ModelDownloadService` 的具体下载逻辑进一步抽到 Harness 层
-2. 把 `LlamaEngine` 中的模型存储、下载、运行时职责继续拆分
+1. 把 `LlamaEngine` 中的运行时职责继续拆分为独立 `LlamaRuntime`
+2. 新增 `HarnessModelRegistry`，推动阶段三
 3. 把 TTS 路径也逐步并入 Harness 能力模型

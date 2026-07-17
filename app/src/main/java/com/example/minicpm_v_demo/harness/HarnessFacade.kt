@@ -3,28 +3,22 @@ package com.example.minicpm_v_demo.harness
 import android.content.Context
 import com.example.minicpm_v_demo.LlamaEngine
 import com.example.minicpm_v_demo.LlamaState
-import com.example.minicpm_v_demo.ModelDownloadService
 import com.example.minicpm_v_demo.ModelInfo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import java.io.File
-
-data class HarnessModelAvailability(
-    val model: ModelInfo,
-    val ggufMissing: Boolean,
-    val supportArtifactMissing: Boolean
-)
 
 class HarnessFacade private constructor(
-    private val context: Context,
-    private val backend: HarnessBackend
+    private val modelStore: LlamaModelStore,
+    private val backend: HarnessBackend,
+    private val downloadManager: LlamaDownloadManager
 ) {
 
     companion object {
         fun getInstance(context: Context): HarnessFacade =
             HarnessFacade(
-                context = context.applicationContext,
-                backend = LlamaBackendAdapter(context.applicationContext)
+                modelStore = LlamaModelStore(context.applicationContext),
+                backend = LlamaBackendAdapter(context.applicationContext),
+                downloadManager = LlamaDownloadManager(context.applicationContext)
             )
     }
 
@@ -38,54 +32,39 @@ class HarnessFacade private constructor(
         get() = backend.isVideoUnderstandingSupported
 
     fun migrateLegacyLayoutIfNeeded() {
-        LlamaEngine.migrateLegacyLayoutIfNeeded(context)
+        modelStore.migrateLegacyLayoutIfNeeded()
     }
 
-    fun getSelectedModel(): ModelInfo = LlamaEngine.getSelectedModel(context)
+    fun getSelectedModel(): ModelInfo = modelStore.getSelectedModel()
 
-    fun getSelectedModelSpec(): HarnessModelSpec = getSelectedModel().toHarnessSpec()
+    fun getSelectedModelSpec(): HarnessModelSpec = modelStore.getSelectedModelSpec()
 
     fun setSelectedModel(modelId: String) {
-        LlamaEngine.setSelectedModel(context, modelId)
+        modelStore.setSelectedModel(modelId)
     }
 
     fun markModelSwitched() {
-        LlamaEngine.markModelSwitched(context)
+        modelStore.markModelSwitched()
     }
 
-    fun consumeModelSwitched(): Boolean = LlamaEngine.consumeModelSwitched(context)
+    fun consumeModelSwitched(): Boolean = modelStore.consumeModelSwitched()
 
-    fun isSelectedModelDownloaded(): Boolean = LlamaEngine.modelsExist(context)
+    fun isSelectedModelDownloaded(): Boolean = modelStore.isSelectedModelDownloaded()
 
-    fun getImageMaxSliceNums(): Int = LlamaEngine.getImageMaxSliceNums(context)
+    fun getImageMaxSliceNums(): Int = modelStore.getImageMaxSliceNums()
 
     suspend fun setImageMaxSliceNums(n: Int) {
         backend.setImageMaxSliceNums(n)
     }
 
-    fun getSelectedModelAvailability(): HarnessModelAvailability {
-        val model = getSelectedModel()
-        val modelPath = File(LlamaEngine.modelPath(context))
-        val ggufMissing = !modelPath.exists()
-        val supportArtifactMissing = when {
-            model.isTextOnly -> false
-            model.isTts -> {
-                val acousticPath = LlamaEngine.acousticPath(context)?.let(::File)
-                acousticPath == null || !acousticPath.exists()
-            }
-            else -> {
-                val mmprojPath = LlamaEngine.mmprojPath(context)?.let(::File)
-                mmprojPath == null || !mmprojPath.exists()
-            }
-        }
-        return HarnessModelAvailability(model, ggufMissing, supportArtifactMissing)
-    }
+    fun getSelectedModelAvailability(): HarnessModelAvailability =
+        modelStore.getSelectedModelAvailability()
 
     suspend fun loadSelectedModel() {
-        val modelPath = File(LlamaEngine.modelPath(context))
-        require(modelPath.exists()) { "File not found: ${modelPath.absolutePath}" }
-        val mmprojArg = LlamaEngine.mmprojPath(context)?.takeIf { File(it).exists() }
-        backend.loadModel(modelPath.absolutePath, mmprojArg)
+        val files = modelStore.getSelectedModelFiles()
+        require(files.ggufFile.exists()) { "File not found: ${files.ggufFile.absolutePath}" }
+        val mmprojArg = files.mmprojFile?.takeIf { it.exists() }?.absolutePath
+        backend.loadModel(files.ggufFile.absolutePath, mmprojArg)
     }
 
     suspend fun unloadModel() {
@@ -125,21 +104,11 @@ class HarnessFacade private constructor(
     }
 
     fun startDownloadService() {
-        ModelDownloadService.start(context)
+        downloadManager.startForegroundDownload()
     }
 
     fun selectedModelArtifactNames(): List<String> =
-        getSelectedModelSpec().artifacts.map { it.fileName }
+        modelStore.selectedModelArtifactNames()
 
-    fun deleteSelectedModelFiles(): Boolean {
-        val modelPath = File(LlamaEngine.modelPath(context))
-        val mmprojPath = LlamaEngine.mmprojPath(context)?.let(::File)
-        val acousticPath = LlamaEngine.acousticPath(context)?.let(::File)
-
-        var deleted = false
-        if (modelPath.exists() && modelPath.delete()) deleted = true
-        if (mmprojPath?.exists() == true && mmprojPath.delete()) deleted = true
-        if (acousticPath?.exists() == true && acousticPath.delete()) deleted = true
-        return deleted
-    }
+    fun deleteSelectedModelFiles(): Boolean = modelStore.deleteSelectedModelFiles()
 }
