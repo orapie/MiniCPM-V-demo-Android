@@ -30,3 +30,6 @@ logcat.txt
 logcat2.txt
 logcat_live.txt
 app/cmake_test_build2/
+
+# Ignore any directory named data anywhere in the repository.
+**/data/
