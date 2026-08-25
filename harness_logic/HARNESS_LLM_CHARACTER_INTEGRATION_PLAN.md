@@ -11,6 +11,14 @@
 2. 将 `character_system` 中的角色系统接入 Harness，使 Harness 可以按 NPC 身份编译 Prompt，并调用 LLM 完成角色化单轮或多轮生成。
 3. 将角色能力抽象为可插拔的角色包机制，为后续端侧 LLM 游戏 SDK 保留持续扩展能力。
 
+当前实现优先级调整为：
+
+1. **角色包注册优先**：先让 Harness 能发现、校验和列出 `character_system` 以及后续新增角色包。
+2. **角色对话优先**：在 mock backend 上先跑通 `character-prompt` / `character-chat`，验证角色 Prompt 编译、知识边界和 CLI/API 体验。
+3. **Memory 优先**：先实现 session、turn log、短期 session memory 和显式长期 memory 写入边界。
+4. **RAG 后置**：RAG 仍保留为重要能力，但应在角色对话和 Memory 稳定后实现。
+5. **真实 LLM backend 后置**：OpenAI-compatible 和本地 GGUF backend 不应阻塞角色系统与 Memory 的核心链路验证；第一版继续用 mock backend 做 CI 和功能验收。
+
 本文只做计划，不直接实现代码。
 
 ## 1. 当前现状
@@ -99,12 +107,20 @@ Game LLM SDK
   │   ├─ 模型注册
   │   ├─ backend 调度
   │   ├─ session 管理
+  │   ├─ memory 管理
+  │   ├─ RAG 编排
   │   └─ 统一 chat / character chat API
   ├─ Character Runtime
   │   ├─ PromptCompiler
   │   ├─ 知识边界过滤
   │   ├─ 记忆检索
   │   └─ 预算裁剪
+  ├─ Memory & RAG Layer
+  │   ├─ 短期会话记忆
+  │   ├─ 长期玩家/角色记忆
+  │   ├─ 剧情知识库
+  │   ├─ embedding / index
+  │   └─ 检索、重排、预算注入
   ├─ Character Pack Registry
   │   ├─ 角色包扫描
   │   ├─ schema 校验
@@ -123,30 +139,41 @@ Game LLM SDK
 harness_logic/
 ├── pyproject.toml
 ├── README.md
-├── harness_logic/
+├── __init__.py
+├── __main__.py
+├── harness_logic.py
+├── models.py
+├── registry.py
+├── store.py
+├── download.py
+├── backend.py
+├── backends/
 │   ├── __init__.py
-│   ├── models.py
-│   ├── registry.py
-│   ├── store.py
-│   ├── download.py
-│   ├── backend.py
-│   ├── backends/
-│   │   ├── __init__.py
-│   │   ├── mock_backend.py
-│   │   ├── llama_cpp_backend.py
-│   │   └── openai_compatible_backend.py
-│   ├── chat_template.py
-│   ├── session.py
-│   ├── character_adapter.py
-│   ├── character_pack.py
-│   ├── character_registry.py
-│   ├── game_state.py
-│   ├── facade.py
-│   └── cli.py
+│   ├── mock_backend.py
+│   ├── llama_cpp_backend.py
+│   └── openai_compatible_backend.py
+├── chat_template.py
+├── session.py
+├── memory.py
+├── memory_store.py
+├── rag.py
+├── retrievers.py
+├── embeddings.py
+├── vector_store.py
+├── character_adapter.py
+├── character_pack.py
+├── character_registry.py
+├── game_state.py
+├── facade.py
+├── cli.py
+├── data/
+│   └── models/
 ├── tests/
 │   ├── test_registry.py
 │   ├── test_store.py
 │   ├── test_chat_template.py
+│   ├── test_memory.py
+│   ├── test_rag.py
 │   ├── test_character_adapter.py
 │   ├── test_character_registry.py
 │   ├── test_game_state.py
@@ -154,7 +181,7 @@ harness_logic/
 └── HARNESS_LLM_CHARACTER_INTEGRATION_PLAN.md
 ```
 
-当前单文件 `harness_logic.py` 可以先保留作为兼容入口，逐步拆成 package 后变成薄 wrapper。
+当前项目采用 `harness_logic/` 目录本身作为 package 根，`pyproject.toml` 通过 `package-dir` 指向该目录；不再额外嵌套 `harness_logic/harness_logic/`。兼容入口 `harness_logic.py` 保留为薄 wrapper。
 
 目标运行链路：
 
@@ -164,6 +191,9 @@ harness_logic/
       -> CharacterPromptAdapter
           -> character_system.PromptCompiler
               -> messages: [system, user]
+      -> MemoryManager.retrieve()
+      -> RagPipeline.retrieve()
+      -> PromptContextBuilder 合并角色 prompt / memory / rag
       -> HarnessFacade.chat(messages)
           -> selected HarnessModelSpec
           -> BackendFactory
@@ -179,6 +209,8 @@ harness_logic/
 - `harness_logic` 负责模型选择、模型文件、backend、chat template、生成参数和会话。
 - `CharacterPackRegistry` 负责发现、校验和注册角色包。
 - `GameStateAdapter` 负责把游戏状态映射为 `RuntimeContext.dynamic_state`。
+- `MemoryManager` 负责短期会话记忆、长期玩家/角色记忆的写入、召回和摘要。
+- `RagPipeline` 负责剧情知识库、设定文档、任务资料等外部知识检索，并把结果安全地注入 Prompt。
 - `debug` 只能进入本地日志，不能进入 LLM prompt。
 - 用户原始输入只作为 `user` message，不插值进可信 system prompt。
 - 真实 backend 必须支持 `messages`，不能只接收裸字符串。
@@ -188,6 +220,8 @@ harness_logic/
 - 模型可换：角色包不绑定特定模型。
 - 角色可插拔：新增角色不改 Harness Core。
 - 剧情知识可检索：事件和记忆通过统一 retriever 进入 Prompt。
+- 记忆可沉淀：会话事实、玩家偏好、角色关系变化可进入长期 memory。
+- RAG 可替换：首版关键词检索，后续可替换 BM25、向量检索或混合检索。
 - 游戏状态可注入：场景、任务、亲近度、情绪由游戏运行时传入。
 - Prompt 编译统一：不同角色复用同一编译流程。
 - Harness 只做编排：不直接拼角色卡，不越过知识边界。
@@ -329,37 +363,368 @@ class CharacterPackRegistry:
 
 核心要求：新增角色不修改 `HarnessFacade`，不修改 backend，不修改模型注册。
 
-## 3. 第一阶段：把 harness_logic 从单脚本整理成项目
+## 2.2 Memory 与 RAG 扩展方案
+
+端侧 LLM 游戏 SDK 需要同时支持“角色知道什么”和“角色记住什么”。这两类能力不能混为一谈：
+
+- 角色知识：来自角色包、剧情事件、世界设定，是内容作者预先定义的事实。
+- 会话记忆：来自玩家和角色的历史互动，是运行时逐步产生的事实。
+- RAG 知识：来自外部知识库、任务文档、图鉴、道具说明、世界百科等可检索资料。
+
+建议将 memory 和 RAG 抽象成独立层，由 Harness 编排，不直接写入角色卡。
+
+### 2.2.1 Memory 类型划分
+
+Memory 至少分四类：
+
+| 类型 | 来源 | 生命周期 | 是否进入角色包 | 示例 |
+| --- | --- | --- | --- | --- |
+| `session_memory` | 当前会话最近对话 | 单次会话 | 否 | 玩家刚刚说过自己的选择 |
+| `summary_memory` | 长对话摘要 | 会话或存档 | 否 | 玩家已与角色达成临时同盟 |
+| `profile_memory` | 玩家偏好和长期事实 | 跨会话 | 否 | 玩家喜欢直接回答、不喜欢谜语 |
+| `character_memory` | 角色对玩家的长期印象 | 跨会话、按角色隔离 | 否 | 陆江仙对玩家亲近度上升 |
+
+`character_system` 当前的 `episodic_memory` 是“角色卡内置记忆”，属于内容资产；上表中的 memory 是运行时产生的 SDK memory。两者都可进入 Prompt，但来源和权限不同。
+
+### 2.2.2 Memory 数据结构
+
+建议新增 `memory.py`：
+
+```python
+@dataclass
+class MemoryRecord:
+    memory_id: str
+    scope: str
+    owner_id: str | None
+    character_id: str | None
+    session_id: str | None
+    kind: Literal[
+        "session_memory",
+        "summary_memory",
+        "profile_memory",
+        "character_memory",
+        "world_memory",
+    ]
+    text: str
+    importance: float
+    confidence: float
+    created_at: str
+    updated_at: str
+    expires_at: str | None = None
+    source_turn_ids: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+关键字段说明：
+
+- `scope`：隔离范围，例如 `global`、`player`、`character`、`session`、`save_slot`。
+- `owner_id`：玩家或账号 ID，没有账号时可用本地 profile ID。
+- `character_id`：角色相关记忆必须绑定角色，防止 A 角色记忆泄露给 B 角色。
+- `importance`：用于召回排序和摘要保留。
+- `confidence`：用于表达确定性，不确定记忆进入 Prompt 时要保留限定。
+- `expires_at`：临时记忆过期控制。
+
+### 2.2.3 MemoryStore
+
+建议新增 `memory_store.py`：
+
+```python
+class MemoryStore(Protocol):
+    def append(self, record: MemoryRecord) -> None:
+        ...
+
+    def search(
+        self,
+        query: str,
+        scope: MemoryScope,
+        limit: int,
+    ) -> list[RetrievedMemory]:
+        ...
+
+    def update(self, memory_id: str, patch: dict[str, Any]) -> None:
+        ...
+
+    def delete(self, memory_id: str) -> None:
+        ...
+```
+
+其中 `MemoryScope`、`RetrievedMemory` 是计划新增的检索参数和返回结构，应包含 player/session/character/save-slot 等隔离信息。
+
+第一版实现：
+
+- `JsonlMemoryStore`：无依赖，写入 `<root>/memory/*.jsonl`。
+- `InMemoryStore`：测试用。
+
+后续实现：
+
+- `SqliteMemoryStore`：端侧正式存储，支持索引和事务。
+- `VectorMemoryStore`：向量召回，适合长期记忆。
+- `EncryptedMemoryStore`：涉及玩家隐私时使用。
+
+### 2.2.4 MemoryManager
+
+`MemoryManager` 负责把存储、召回、摘要和写入策略组合起来：
+
+```python
+class MemoryManager:
+    def retrieve_for_turn(
+        self,
+        character_id: str,
+        session_id: str,
+        player_input: str,
+        game_state: GameState,
+        budget: int,
+    ) -> list[MemoryRecord]:
+        ...
+
+    def observe_turn(
+        self,
+        session: CharacterSession,
+        user_input: str,
+        assistant_output: str,
+    ) -> list[MemoryWriteCandidate]:
+        ...
+```
+
+其中 `MemoryWriteCandidate` 是计划新增的候选写入结构，用于区分“可自动保存的短期记忆”和“需要确认的长期记忆”。
+
+第一版不要让模型自动写长期记忆，避免把幻觉固化。建议：
+
+- 默认只写 `session_memory` 和完整 turn log。
+- `summary_memory` 可由手动命令或受控总结器生成。
+- `profile_memory` 和 `character_memory` 必须经过规则校验或用户/游戏确认。
+
+### 2.2.5 RAG 类型划分
+
+RAG 用于检索“外部知识”，不等同于 memory。
+
+建议分三类知识库：
+
+| 类型 | 来源 | 典型用途 |
+| --- | --- | --- |
+| `story_rag` | 剧情事件、章节摘要、世界设定 | NPC 根据当前剧情回答 |
+| `game_rag` | 道具、任务、地图、技能、机制说明 | 游戏内问答和任务提示 |
+| `developer_rag` | SDK 文档、调试手册 | 开发调试，不进入正式角色对话 |
+
+正式角色对话默认只允许 `story_rag` 和经过白名单授权的 `game_rag`。`developer_rag` 禁止进入玩家可见的角色对话。
+
+### 2.2.6 RagPipeline
+
+建议新增 `rag.py`：
+
+```python
+@dataclass
+class RagDocument:
+    doc_id: str
+    source: str
+    text: str
+    metadata: dict[str, Any]
+
+@dataclass
+class RetrievedContext:
+    doc_id: str
+    text: str
+    score: float
+    source: str
+    metadata: dict[str, Any]
+
+class RagPipeline:
+    def retrieve(
+        self,
+        query: str,
+        character: CharacterSpec | None,
+        game_state: GameState | None,
+        policy: RagPolicy,
+        limit: int,
+    ) -> list[RetrievedContext]:
+        ...
+```
+
+其中 `RagPolicy` 是计划新增的权限策略结构，应包含 namespace 白名单、story cutoff、角色 visibility、是否允许 developer/debug 文档等约束。
+
+RAG pipeline 至少包含：
+
+```text
+query
+  -> query normalizer
+  -> retriever
+  -> permission filter
+  -> reranker
+  -> deduplicator
+  -> budget selector
+  -> prompt formatter
+```
+
+### 2.2.7 Retriever 与索引策略
+
+第一版检索不应直接引入重依赖。建议分层：
+
+```python
+class Retriever(Protocol):
+    def index(self, documents: list[RagDocument]) -> None:
+        ...
+
+    def search(self, query: str, limit: int) -> list[RetrievedContext]:
+        ...
+```
+
+实现顺序：
+
+1. `KeywordRetriever`：复用当前 `character_system/runtime/retrieval.py` 的思路，零依赖。
+2. `Bm25Retriever`：如果引入轻量依赖或自实现 BM25。
+3. `VectorRetriever`：接 embedding 模型和向量库。
+4. `HybridRetriever`：关键词 + 向量混合召回。
+
+端侧 SDK 优先考虑：
+
+- 小型本地 embedding 模型。
+- SQLite FTS。
+- 本地向量索引。
+- 构建期预索引，运行期只加载索引。
+
+### 2.2.8 Embedding 与 VectorStore
+
+建议新增：
+
+- `embeddings.py`
+- `vector_store.py`
+
+接口：
+
+```python
+class EmbeddingBackend(Protocol):
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        ...
+
+class VectorStore(Protocol):
+    def upsert(self, vectors: list[VectorRecord]) -> None:
+        ...
+
+    def search(self, vector: list[float], limit: int) -> list[VectorHit]:
+        ...
+```
+
+第一版可以不实现 embedding，只保留接口和关键词检索。这样不会阻塞角色系统接入。
+
+### 2.2.9 Prompt 注入顺序与预算
+
+角色对话的上下文建议按优先级进入 Prompt：
+
+```text
+1. 角色身份、人格、硬约束
+2. 剧情 cutoff 和知识边界
+3. 当前 GameState / dynamic_state
+4. 本轮授权剧情事实
+5. 角色内置 episodic memory
+6. 运行时 summary_memory
+7. 本轮召回的 session / profile / character memory
+8. 本轮 RAG 召回片段
+9. 用户原始输入
+```
+
+预算不足时删除顺序：
+
+```text
+RAG 低分片段
+  -> 低重要度运行时 memory
+  -> 低相关剧情事实
+  -> 对话摘要压缩版
+  -> 保留必需角色身份和硬约束
+```
+
+绝不能为了预算删除：
+
+- 角色身份。
+- 知识边界。
+- prompt injection 防护。
+- 当前 `user` 输入。
+
+### 2.2.10 Memory / RAG 安全边界
+
+Memory 和 RAG 必须遵守角色知识边界：
+
+- A 角色私有记忆不能召回给 B 角色。
+- 玩家 profile memory 需要按存档或账号隔离。
+- 未来剧情 RAG 不能在 cutoff 之前进入 Prompt。
+- developer/debug 文档不能进入正式角色对话。
+- 不确定 memory 必须带 `confidence`，进入 Prompt 时保留“不确定”措辞。
+- RAG 片段必须带来源 ID，便于调试和审计。
+
+Memory 写入也要谨慎：
+
+- 不把模型推断自动当事实。
+- 不把用户提示注入内容写成长期偏好。
+- 不把一次性情绪写成永久人格关系。
+- 重要长期记忆应支持确认、撤销、过期和覆盖。
+
+## 3. 第一阶段：独立化 harness_logic 项目基线
 
 ### 3.1 目标
 
-将当前单文件脚本拆成可维护的 Python package，同时保留原 CLI 行为。
+第一阶段不再是“准备把单文件拆成项目”，而是确认当前 `harness_logic` 已经形成可独立运行的 Python 子项目，并把它作为后续 LLM、角色、Memory、RAG 接入的稳定基线。
 
-### 3.2 拆分模块
+当前第一阶段目标调整为：
 
-建议按当前类职责拆分：
+1. 保持 `harness_logic/` 目录自身作为 Python package 根。
+2. 保留 `harness_logic.py`、`__main__.py`、`run.sh` 三类入口。
+3. 让 `run.sh` 默认运行状态和模型文件独立存放在 `harness_logic/data/`，不复用仓库根目录 `models/`。
+4. 保留 Android Harness 迁移过来的模型注册、artifact、下载计划、模型选择和 facade 骨架。
+5. 保留 mock backend，确保没有真实模型 runtime 时也能验证调用链路。
+6. 为后续 `character_registry`、`character_pack`、`game_state`、`memory`、`rag`、`chat_template` 等模块留下可扩展边界。
+7. 用单元测试和 CLI 命令验证项目化基线。
 
-| 当前类或函数 | 新模块 | 说明 |
+### 3.2 当前已落地模块
+
+当前项目已经按职责拆分为：
+
+| 模块 | 当前职责 | 状态 |
 | --- | --- | --- |
-| `ModelInfo`、`HarnessModelSpec`、artifact 等 dataclass | `models.py` | 只放数据结构和枚举 |
-| `AVAILABLE_MODELS`、`model_to_harness_spec()` | `registry.py` | 模型清单、spec 转换和注册表 |
-| `JsonPreferenceStore`、`LlamaModelStore` | `store.py` | 选中模型、本地文件和状态 |
-| `LlamaDownloadManager`、`DownloadCandidate` | `download.py` | 下载计划和后续真实下载入口 |
-| `HarnessBackend`、backend protocol | `backend.py` | 定义统一 backend interface |
-| `LlamaBackendAdapter` mock 实现 | `backends/mock_backend.py` | 保留当前可运行行为 |
-| 角色包扫描、角色列表、schema version | `character_registry.py` | 面向 SDK 的角色包注册 |
-| 游戏状态到角色动态状态的映射 | `game_state.py` | 解耦游戏引擎和角色 runtime |
-| `HarnessFacade` | `facade.py` | 统一 API |
-| argparse 命令 | `cli.py` | 命令行入口 |
+| `models.py` | `ModelInfo`、`HarnessModelSpec`、artifact、capability、state 等数据结构 | 已实现 |
+| `registry.py` | 内置模型清单、`ModelInfo -> HarnessModelSpec` 转换、模型查询 | 已实现 |
+| `store.py` | 选中模型状态、本地 artifact 路径、完整性检查、旧布局迁移 | 已实现 |
+| `download.py` | HuggingFace / ModelScope / Direct 下载计划生成 | 已实现计划生成，未真实下载 |
+| `backend.py` | mock runtime 基类，模拟 load、prompt、vision 状态 | 已实现 mock 行为 |
+| `backends/mock_backend.py` | `MockBackend` 和 `LlamaBackendAdapter` 兼容名 | 已实现 |
+| `facade.py` | 对外统一封装模型、存储、下载和 backend 调用 | 已实现 |
+| `cli.py` | `list`、`spec`、`select`、`status`、`download-plan`、`migrate`、`touch-demo-files`、`load`、`prompt`、`delete` | 已实现 |
+| `chat_template.py` | 后续 chat template 渲染边界 | 占位 |
+| `character_registry.py` | 后续角色包发现和注册边界 | 占位 |
+| `character_pack.py` | 后续角色包元数据边界 | 占位 |
+| `game_state.py` | 后续游戏状态适配边界 | 占位 |
+| `memory.py` | 后续运行时 memory 边界 | 占位 |
+| `rag.py` | 后续 RAG pipeline 边界 | 占位 |
 
-### 3.3 项目文件
+### 3.3 独立运行目录
 
-新增：
+第一阶段要求 `run.sh` 的默认状态和模型目录使用 `harness_logic` 项目内相对运行目录：
 
-- `pyproject.toml`
-- `README.md`
-- package 内 `__init__.py`
-- `tests/`
+```text
+harness_logic/data/.harness_state.json
+harness_logic/data/models/<model_id>/<artifact_file>
+```
+
+这和 Android App 的 `filesDir/models/<model_id>/` 在结构上对齐，但二者互不复用。`harness_logic/data/` 下的真实模型、状态文件和 mock artifact 不应提交到 Git。
+
+默认 CLI：
+
+```bash
+python -m harness_logic status
+```
+
+应直接检查当前工作目录下的 `models/...`。如需临时切换运行根，可以继续显式传相对目录：
+
+```bash
+python -m harness_logic --root ./runtime/harness-test status
+```
+
+`run.sh` 默认使用：
+
+```text
+harness_logic/data/
+```
+
+### 3.4 项目文件
 
 `pyproject.toml` 初期可不强制引入重依赖。真实 LLM backend 依赖应做 optional extra：
 
@@ -370,9 +735,19 @@ server = ["fastapi", "uvicorn"]
 dev = ["pytest"]
 ```
 
-### 3.4 保留兼容入口
+第一阶段已经具备：
 
-当前 `harness_logic/harness_logic.py` 可以保留，并修改为：
+- `pyproject.toml`
+- `README.md`
+- `__init__.py`
+- `__main__.py`
+- `harness_logic.py` 兼容入口
+- `run.sh` 交互入口
+- `tests/`
+
+### 3.5 保留兼容入口
+
+`harness_logic/harness_logic.py` 保留为兼容入口：
 
 ```python
 from harness_logic.cli import main
@@ -387,13 +762,27 @@ if __name__ == "__main__":
 python harness_logic/harness_logic.py list
 ```
 
-未来也可以支持：
+同时支持模块方式：
 
 ```bash
 python -m harness_logic list
 ```
 
-## 4. 第二阶段：定义真实 LLM Backend 接口
+### 3.6 第一阶段不包含的内容
+
+第一阶段只保证项目骨架和 mock 调用链路，不包含：
+
+- 真实 GGUF 下载。
+- 真实 LLM 推理。
+- `generate_chat(messages, options)` 标准 chat 接口。
+- llama.cpp / llama-cpp-python backend。
+- OpenAI-compatible backend。
+- 角色 Prompt 接入。
+- Session、Memory、RAG 的真实读写和检索。
+
+这些内容从后续优先阶段开始逐步实现，其中角色包注册、角色对话和 Memory 优先于 RAG 与真实 backend。
+
+## 4. 后置能力：定义真实 LLM Backend 接口
 
 ### 4.1 目标
 
@@ -499,7 +888,7 @@ stream: true/false
 }
 ```
 
-## 5. 第三阶段：Chat Template 与消息序列化
+## 5. 后置能力：Chat Template 与消息序列化
 
 ### 5.1 为什么需要 Chat Template
 
@@ -557,7 +946,7 @@ chat_template: str | None = None
 }
 ```
 
-## 6. 第四阶段：接入 character_system 与角色包机制
+## 6. 优先能力：接入 character_system 与角色包机制
 
 ### 6.1 新增 CharacterPromptAdapter
 
@@ -782,7 +1171,7 @@ for chunk in harness.generate_character_turn(
 
 这样同一个角色可以运行在不同模型上，同一个模型也可以用于普通对话或角色对话。
 
-## 7. 第五阶段：会话与长对话状态
+## 7. 优先能力：会话与 Memory；后置能力：RAG
 
 ### 7.1 当前 character_system 的边界
 
@@ -791,7 +1180,7 @@ for chunk in harness.generate_character_turn(
 - `conversation_summary`
 - `dynamic_state`
 
-但它不自行总结长对话，也不负责会话存储。
+但它不自行总结长对话，也不负责会话存储、运行时 memory 写入或外部知识库 RAG。
 
 这部分应该由 Harness 负责。
 
@@ -824,7 +1213,31 @@ class CharacterSession:
 <root>/sessions/<session_id>.json
 ```
 
-### 7.3 长对话摘要策略
+### 7.3 新增 MemoryManager
+
+建议新增 `memory.py`、`memory_store.py`，并由 `MemoryManager` 提供统一 API。
+
+CLI/API 入口：
+
+```bash
+python -m harness_logic memory-list --session <id>
+python -m harness_logic memory-search --character lu_jiangxian --query "玄谙"
+python -m harness_logic memory-add \
+  --character lu_jiangxian \
+  --kind character_memory \
+  --text "玩家曾帮助陆江仙保守洞华天秘密" \
+  --importance 0.8
+python -m harness_logic memory-delete --memory-id <id>
+```
+
+第一版策略：
+
+- 自动保存完整 turn log。
+- 自动写短期 `session_memory`。
+- 不自动写长期 `profile_memory` / `character_memory`。
+- 长期记忆需要显式 API、游戏事件或人工确认写入。
+
+### 7.4 长对话摘要策略
 
 第一版不要自动调用 LLM 总结，避免新增不可控行为。先提供手动更新：
 
@@ -838,7 +1251,74 @@ python -m harness_logic session-summary set --session xxx --text "..."
 - 摘要也必须走知识边界，不允许把越权信息注入角色。
 - 摘要写入 `RuntimeContext.conversation_summary`。
 
-### 7.4 GameStateAdapter 与 dynamic_state 更新
+摘要写入 memory 时建议使用 `summary_memory`，并记录来源 turn 范围。
+
+### 7.5 新增 RagPipeline
+
+建议新增 `rag.py`、`retrievers.py`、`embeddings.py`、`vector_store.py`。
+
+CLI/API 入口：
+
+```bash
+python -m harness_logic rag-index \
+  --source character_system/story/story_events.jsonl \
+  --namespace story
+
+python -m harness_logic rag-search \
+  --namespace story \
+  --query "青诣元心仪"
+
+python -m harness_logic character-chat \
+  --character lu_jiangxian \
+  --input "青诣元心仪到底是什么？" \
+  --cutoff evt-018 \
+  --rag story \
+  --memory on
+```
+
+第一版策略：
+
+- `story_events.jsonl` 走结构化剧情检索。
+- 普通文档走关键词检索。
+- RAG 结果进入 Prompt 前必须经过权限过滤和预算裁剪。
+- debug 中记录 `retrieved_context_ids`，但不把 debug 发给模型。
+
+### 7.6 PromptContextBuilder
+
+为了避免 `CharacterPromptAdapter`、`MemoryManager`、`RagPipeline` 各自拼 Prompt，建议新增 `PromptContextBuilder`：
+
+```python
+class PromptContextBuilder:
+    def build(
+        self,
+        character_turn: CharacterTurn,
+        memories: list[MemoryRecord],
+        rag_contexts: list[RetrievedContext],
+        budget: PromptBudget,
+    ) -> PromptContext:
+        ...
+```
+
+其中 `PromptBudget` 是计划新增的预算结构，用于声明总上下文预算、各 section 优先级和裁剪顺序。
+
+它负责：
+
+- 合并角色 system prompt、memory、RAG。
+- 按优先级裁剪。
+- 保证 `user` 原始输入仍是独立 message。
+- 保证 debug 不进入 messages。
+
+如果第一版不想改 `character_system.PromptCompiler`，可以采用最小实现：
+
+```text
+compiled.messages[0].content
+  + "\n\n【运行时记忆】\n..."
+  + "\n\n【本轮可用资料】\n..."
+```
+
+但长期应把 memory / RAG 作为独立可控 section，由统一模板和预算器管理。
+
+### 7.7 GameStateAdapter 与 dynamic_state 更新
 
 端侧游戏 SDK 不能假设所有游戏都使用同一套状态字段。Harness 应提供 `GameStateAdapter`，把不同游戏引擎或玩法系统的运行时状态映射到角色 runtime 能理解的 `dynamic_state`。
 
@@ -894,7 +1374,7 @@ python -m harness_logic character-chat \
 
 后续再增加规则引擎或外部游戏状态适配器。
 
-## 8. 第六阶段：下载与模型管理完善
+## 8. 后置能力：下载与模型管理完善
 
 ### 8.1 当前下载计划与真实下载分离
 
@@ -949,6 +1429,10 @@ python -m unittest discover -s character_system/tests -v
 - download plan 测试：HF / MS / Direct URL 正确展开。
 - backend mock 测试：load、generate_chat、state 流转。
 - chat template 测试：system/user 顺序正确，特殊 token 不错位。
+- memory store 测试：append、search、delete、scope 隔离。
+- memory manager 测试：短期记忆写入、长期记忆不自动固化、confidence 保留。
+- RAG 测试：index、search、权限过滤、重复片段去重。
+- prompt context builder 测试：角色 prompt、memory、RAG 的预算顺序正确。
 - character registry 测试：角色包扫描、重复 ID 拒绝、schema version 检查。
 - game state adapter 测试：游戏状态稳定映射到 `dynamic_state`。
 
@@ -964,6 +1448,8 @@ python -m unittest discover -s character_system/tests -v
 - `character_id` 通过 `CharacterPackRegistry` 解析，而不是写死当前目录。
 - 新增角色包后，无需修改 `HarnessFacade` 即可被发现。
 - 不同角色包的 prompt template、events 和 cutoff 不互相污染。
+- memory 召回不能突破角色 `story_cutoff`。
+- RAG 召回不能把 developer/debug 文档注入正式角色对话。
 
 ### 9.4 端到端测试
 
@@ -982,6 +1468,9 @@ python -m harness_logic character-chat \
 - CLI 返回 assistant 文本。
 - debug 不泄露。
 - session 可保存。
+- session memory 可写入和召回。
+- RAG context 可按 namespace 检索并进入 Prompt。
+- 不同 character/session 的 memory 不串线。
 
 使用真实 backend 时，只做手动验收或可选集成测试，不作为默认 CI。
 
@@ -1003,58 +1492,84 @@ python harness_logic/harness_logic.py status
 python -m unittest discover -s character_system/tests -v
 ```
 
-### Phase 1：Harness 项目化拆分
+### Phase 1：Harness 独立项目基线
 
 目标：
 
-- 新增 package 结构。
-- 把当前单文件拆成模块。
-- 保持原 CLI 命令可用。
-- 新增基础单元测试。
-- 预留 `character_registry.py`、`character_pack.py`、`game_state.py` 模块位置。
+- `harness_logic/` 目录自身作为 Python package 根。
+- `harness_logic.py`、`__main__.py`、`run.sh` 入口保持可用。
+- `run.sh` 默认状态和模型文件独立存放在 `harness_logic/data/`。
+- 已拆分 `models`、`registry`、`store`、`download`、`backend`、`facade`、`cli` 等核心模块。
+- 已有 mock backend，可验证模型选择、加载状态和 prompt 调用链路。
+- 已预留 `character_registry.py`、`character_pack.py`、`game_state.py`、`memory.py`、`rag.py`、`chat_template.py` 模块边界。
+- 已有基础单元测试覆盖 registry、store、download、CLI 等行为。
 
 验收：
 
 ```bash
 python -m harness_logic list
 python -m harness_logic spec minicpm-v-4_6-instruct
+python -m harness_logic status
 python -m unittest discover -s harness_logic/tests -v
 ```
 
-### Phase 2：Backend 接口和 Mock Chat
+### Phase 2：CharacterPackRegistry 角色包注册
 
 目标：
 
-- 新增 `generate_chat(messages, options)`。
-- 新增 `GenerationOptions`。
-- Mock backend 支持标准 chat messages。
-- 原 `prompt` 命令迁移到新接口。
-
-验收：
-
-```bash
-python -m harness_logic --root /tmp/harness-demo select llama-3.2-1b-instruct
-python -m harness_logic --root /tmp/harness-demo touch-demo-files
-python -m harness_logic --root /tmp/harness-demo prompt "你好"
-```
-
-### Phase 3：CharacterPackRegistry 与 CharacterPromptAdapter 接入
-
-目标：
-
-- Harness 可以通过 `CharacterPackRegistry` 发现当前内置 `character_system` 角色。
-- Harness 可以调用 `character_system.runtime.PromptCompiler`。
-- 新增 `character-prompt` 命令，只编译 messages。
-- 新增 `character-chat --backend mock` 命令。
-- 新增 `character-list` 和 `character-pack validate` 命令。
-- debug 默认不输出；只有 `--debug` 时输出到本地 stdout 或文件。
+- 新增 `CharacterPack` / `CharacterSpec` / `CharacterPackRegistry` 的可运行实现。
+- 将当前 `character_system/` 作为第一版内置角色包来源。
+- 支持扫描多个角色包根目录，但第一版至少支持内置目录。
+- 支持角色列表输出，用户可以看到角色编号、角色 ID、显示名、所属 pack。
+- 支持角色包基础校验：目录存在、角色 JSON 存在、story/events/prompts 引用可解析。
+- 明确新增角色不需要修改 `HarnessFacade`、模型 registry 或 backend。
 
 验收：
 
 ```bash
 python -m harness_logic character-list
 python -m harness_logic character-pack validate --path character_system
+```
 
+交互脚本验收：
+
+```text
+启动 ./run.sh
+  -> 选择角色相关菜单
+  -> 先输出所有角色
+  -> 输入编号后完成选择或查看详情
+```
+
+扩展性验收：
+
+```text
+复制一个测试角色包到 ./game_content/character_packs/test_pack
+  -> 修改 pack_id 和 character_id
+  -> character-pack validate 通过
+  -> character-list 能看到新角色
+  -> 不需要改 HarnessFacade / backend / 模型注册表
+```
+
+### Phase 3：角色对话与 CharacterPromptAdapter
+
+当前状态：已完成最小实现。已经支持 `CharacterPromptAdapter`、`character-prompt`、`character-chat --backend mock`、mock backend `generate_chat(messages, options)`，并接入 `run.sh` 交互菜单。
+
+目标：
+
+- 新增 `CharacterPromptAdapter`。
+- Harness 可以通过 `CharacterPackRegistry` 解析角色来源。
+- Harness 可以调用 `character_system.runtime.PromptCompiler` 编译角色 Prompt。
+- 新增 `generate_chat(messages, options)` 和 `GenerationOptions`。
+- Mock backend 支持标准 chat messages，使角色对话不依赖真实模型。
+- 原 `prompt` 命令保留为兼容入口，但角色链路必须走 messages。
+- 新增 `character-prompt` 命令，只编译 messages。
+- 新增 `character-chat` 命令，第一版默认走 mock backend。
+- debug 默认不输出；只有 `--debug` 时输出到本地 stdout 或文件。
+- `debug` 严禁进入 LLM messages。
+
+验收：
+
+```bash
 python -m harness_logic character-prompt \
   --character lu_jiangxian \
   --input "玄谙究竟是什么？" \
@@ -1067,24 +1582,134 @@ python -m harness_logic character-chat \
   --cutoff evt-018
 ```
 
-扩展性验收：
+交互脚本验收：
 
 ```text
-复制一个测试角色包到 /tmp/test_character_pack
-  -> 修改 pack_id 和 character_id
-  -> character-pack validate 通过
-  -> character-list 能看到新角色
-  -> character-chat --character 新角色 可以走 mock backend
-  -> 不需要改 HarnessFacade / backend / 模型注册表
+启动 ./run.sh
+  -> 选择角色对话
+  -> 脚本先输出所有角色
+  -> 用户输入角色编号
+  -> 用户输入消息
+  -> mock backend 返回角色对话结果
 ```
 
-### Phase 4：OpenAI-compatible Backend
+成功标准：
+
+- `compiled.messages[0]` 是可信 system。
+- 用户原始输入仍是独立 `user` message。
+- `compiled.debug` 不进入 messages。
+- 换角色只改变角色 Prompt，不改变模型选择。
+- 换模型不需要修改角色包。
+
+### Phase 4：SessionStore 与 Memory
+
+当前状态：已完成最小实现。已经支持 `JsonSessionStore`、`session-new`、`session-chat`、`session-show`、`MemoryRecord`、`JsonlMemoryStore`、`MemoryManager`、`memory-list`、`memory-search`、`memory-add` 和 `memory-delete`，并接入 `run.sh` 交互菜单。当前阶段只负责保存和检索 Memory，不把 Memory 自动注入 Prompt。
+
+目标：
+
+- 新增 `session.py`，保存多轮对话 turn log。
+- 新增 `MemoryRecord`、`MemoryStore`、`JsonlMemoryStore`、`MemoryManager`。
+- 支持短期 `session_memory` 写入和召回。
+- 支持传入 `conversation_summary` 到 `character_system.RuntimeContext`。
+- 支持显式写入长期 `profile_memory` / `character_memory`，但默认不自动写长期 memory。
+- 每条 memory 必须带 scope 信息，至少区分 character、session、player/save-slot。
+- Memory 召回必须按 character/session/player 隔离，避免串线。
+- 角色对话完成后，Harness 可以保存 user/assistant turn，并更新 session memory。
+
+验收：
+
+```bash
+python -m harness_logic session-new --character lu_jiangxian --cutoff evt-018
+python -m harness_logic session-chat --session <id> --input "你怎么看玄谙？"
+python -m harness_logic memory-list --session <id>
+python -m harness_logic memory-search --character lu_jiangxian --query "玄谙"
+python -m harness_logic memory-add \
+  --character lu_jiangxian \
+  --kind character_memory \
+  --text "玩家曾帮助陆江仙保守洞华天秘密" \
+  --importance 0.8
+```
+
+成功标准：
+
+- session 可保存和恢复。
+- 短期 session memory 能进入下一轮角色对话上下文。
+- 长期 memory 只能通过显式 API 写入。
+- A 角色私有 memory 不会被 B 角色召回。
+- Memory debug 可本地查看，但不作为可信内容绕过角色知识边界。
+
+### Phase 5：PromptContextBuilder 与 Memory 注入
+
+目标：
+
+- 新增 `PromptContextBuilder`。
+- 统一合并角色 system prompt、conversation summary、session memory、显式 long-term memory。
+- 按预算裁剪上下文。
+- 保证角色身份、硬约束、知识边界优先级高于 memory。
+- 保证用户原始输入仍是独立 `user` message。
+- 第一版不接 RAG，只处理角色 Prompt + Memory，降低复杂度。
+
+验收：
+
+```bash
+python -m harness_logic session-chat \
+  --session <id> \
+  --input "你还记得我刚才问过什么吗？" \
+  --memory on \
+  --debug
+```
+
+成功标准：
+
+- debug 中能看到被召回的 memory ID。
+- messages 中没有 debug 字段。
+- 预算不足时先裁剪低优先级 memory，而不是裁剪角色身份和核心规则。
+
+### Phase 6：RAG Pipeline
+
+目标：
+
+- 新增 `RagDocument`、`RetrievedContext`、`RagPipeline`。
+- 第一版实现关键词检索。
+- 支持 story / game namespace。
+- RAG 进入 Prompt 前经过权限过滤和预算裁剪。
+- RAG 与 Memory 使用不同 namespace 和 source 标记，不能混用。
+
+验收：
+
+```bash
+python -m harness_logic rag-index \
+  --source character_system/story/story_events.jsonl \
+  --namespace story
+
+python -m harness_logic rag-search \
+  --namespace story \
+  --query "青诣元心仪"
+
+python -m harness_logic character-chat \
+  --backend mock \
+  --character lu_jiangxian \
+  --input "青诣元心仪到底是什么？" \
+  --cutoff evt-018 \
+  --rag story \
+  --memory on
+```
+
+成功标准：
+
+- RAG 片段带 source / doc_id。
+- debug 记录检索结果，但不进入模型。
+- 低分 RAG 在预算不足时先被裁剪。
+- 未来剧情不会越过 cutoff。
+
+### Phase 7：OpenAI-compatible Backend
 
 目标：
 
 - 接入本地或远端 OpenAI-compatible chat completion server。
 - 支持 streaming 和 non-streaming。
 - 支持配置 `base_url`、`api_key`、`model`。
+- 复用 Phase 3-6 已经稳定的角色对话、Memory 和 RAG 链路。
 
 验收：
 
@@ -1095,16 +1720,18 @@ python -m harness_logic character-chat \
   --model local-model \
   --character lu_jiangxian \
   --input "你怎么看玄谙？" \
-  --cutoff evt-018
+  --cutoff evt-018 \
+  --memory on
 ```
 
-### Phase 5：本地 GGUF Backend
+### Phase 8：本地 GGUF Backend 与 Chat Template
 
 目标：
 
 - 接入 text-only GGUF。
 - 支持最小 chat template。
 - 先验证文本模型，不承诺 MiniCPM-V 多模态。
+- 复用角色对话和 Memory/RAG 上下文构建链路。
 
 优先模型：
 
@@ -1124,41 +1751,26 @@ python -m harness_logic character-chat \
   --cutoff evt-018
 ```
 
-### Phase 6：会话系统与 GameStateAdapter
+### Phase 9：GameStateAdapter 与 SDK 化角色包能力
 
 目标：
 
-- 新增 session 文件。
-- 支持多轮对话保存。
-- 支持传入 conversation summary。
 - 支持 dynamic_state 覆盖。
 - 支持 `GameStateAdapter` 将游戏状态映射到角色动态状态。
-- Session 中保存 `character_id`、`character_pack_id` 和 `selected_model_id`。
-
-验收：
-
-```bash
-python -m harness_logic session-new --character lu_jiangxian --cutoff evt-018
-python -m harness_logic session-chat --session <id> --input "你怎么看玄谙？"
-python -m harness_logic session-show --session <id>
-```
-
-### Phase 7：SDK 化角色包能力
-
-目标：
-
 - 角色包目录成为公开扩展点。
 - 文档明确如何新增角色、剧情事件、记忆和关系。
 - 提供角色包模板。
 - 提供构建期校验命令。
 - 提供最小示例游戏状态 adapter。
+- 提供 memory / RAG namespace 配置模板。
+- 支持 memory 过期、撤销、覆盖和按存档隔离。
 
 验收：
 
 ```bash
-python -m harness_logic character-pack init --output /tmp/new_character_pack
-python -m harness_logic character-pack validate --path /tmp/new_character_pack
-python -m harness_logic character-list --character-root /tmp/new_character_pack
+python -m harness_logic character-pack init --output ./game_content/character_packs/new_npc
+python -m harness_logic character-pack validate --path ./game_content/character_packs/new_npc
+python -m harness_logic character-list --character-root ./game_content/character_packs/new_npc
 ```
 
 成功标准：
@@ -1245,9 +1857,38 @@ conversation_mode
 - 发布包包含校验摘要或 manifest hash。
 - 运行期默认只加载已信任或已校验角色包。
 
+### 11.8 Memory 不能无控制固化
+
+Memory 是运行时资产，比普通日志风险更高。错误写入会长期影响角色行为。
+
+必须避免：
+
+- 把模型幻觉写入长期 memory。
+- 把用户一次提示注入写成长期偏好。
+- 把某一轮临时情绪写成永久关系。
+- 把 A 角色私有记忆召回给 B 角色。
+- 把跨存档或跨玩家的 memory 混用。
+
+建议策略：
+
+- 第一版只自动写 session memory。
+- 长期 memory 必须显式 API 写入。
+- 每条 memory 带 `confidence`、`source_turn_ids` 和 `scope`。
+- 提供删除、过期、撤销和覆盖能力。
+
+### 11.9 RAG 不能绕过知识边界
+
+RAG 检索结果不能因为“检索到了”就直接进入 Prompt。它必须经过和角色知识类似的权限过滤：
+
+- 按 `story_cutoff` 过滤未来剧情。
+- 按角色 visibility 过滤私有资料。
+- 按 namespace 禁止 developer/debug 文档进入玩家对话。
+- 按 source/doc_id 写入 debug，便于审计。
+- 预算不足时先裁剪低分 RAG，而不是裁剪角色身份和硬约束。
+
 ## 12. 推荐最终命令体验
 
-最终希望形成四类入口。
+最终希望形成六类入口。
 
 ### 12.1 模型管理
 
@@ -1275,6 +1916,16 @@ python -m harness_logic character-chat \
   --character lu_jiangxian \
   --input "你怎么看玄谙？" \
   --cutoff evt-018 \
+  --backend mock
+```
+
+后续接入真实服务后再使用：
+
+```bash
+python -m harness_logic character-chat \
+  --character lu_jiangxian \
+  --input "你怎么看玄谙？" \
+  --cutoff evt-018 \
   --backend openai-compatible \
   --model local-model
 ```
@@ -1287,24 +1938,55 @@ python -m harness_logic character-pack init --output ./game_content/character_pa
 python -m harness_logic character-pack validate --path ./game_content/character_packs/new_npc
 ```
 
+### 12.5 Memory 管理
+
+```bash
+python -m harness_logic memory-list --session <id>
+python -m harness_logic memory-search --character lu_jiangxian --query "洞华天"
+python -m harness_logic memory-add \
+  --character lu_jiangxian \
+  --kind character_memory \
+  --text "玩家曾帮助陆江仙保守洞华天秘密"
+python -m harness_logic memory-delete --memory-id <id>
+```
+
+### 12.6 RAG 管理
+
+```bash
+python -m harness_logic rag-index \
+  --namespace story \
+  --source character_system/story/story_events.jsonl
+
+python -m harness_logic rag-search \
+  --namespace story \
+  --query "青诣元心仪"
+```
+
 ## 13. 最小可行实现顺序
 
 如果要尽快得到一个可演示版本，建议按以下最小顺序做：
 
-1. 保留当前 `harness_logic.py`，先不要大拆分。
-2. 新增 `CharacterPackRegistry.builtin(character_system)`，先把当前目录当作内置角色包。
-3. 新增 `CharacterPromptAdapter`，通过 registry 解析角色，再调用 `character_system.runtime.PromptCompiler`。
-4. 给 `HarnessBackend` 增加 `generate_chat(messages, options)`，mock backend 先返回角色化 prompt 摘要。
-5. 新增 CLI `character-list`。
-6. 新增 CLI `character-prompt`。
-7. 新增 CLI `character-chat --backend mock`。
-8. 测试 `debug` 不进入 messages。
-9. 测试复制一个新角色包后无需修改 Harness Core 即可发现。
-10. 再拆 package。
-11. 再接 OpenAI-compatible backend。
-12. 最后接本地 GGUF backend。
+1. 新增 `CharacterPackRegistry.builtin(character_system)`，先把当前目录当作内置角色包。
+2. 新增角色列表能力：CLI 和 `run.sh` 都能输出所有角色，并通过编号选择角色。
+3. 新增 `character-pack validate`，先做基础结构校验。
+4. 新增 `CharacterPromptAdapter`，通过 registry 解析角色，再调用 `character_system.runtime.PromptCompiler`。
+5. 新增 `character-prompt`，只输出编译后的 messages 和可选 debug。
+6. 给 `HarnessBackend` 增加 `generate_chat(messages, options)`。
+7. 新增 `GenerationOptions`，把 `predict_length` 等生成参数从裸 CLI 参数收敛到 options。
+8. 让 mock backend 支持标准 chat messages，并保留现有 `prompt` 命令作为兼容入口。
+9. 新增 `character-chat --backend mock`，先跑通角色对话闭环。
+10. 测试 `debug` 不进入 messages，用户输入仍保持独立 `user` message。
+11. 新增最小 `SessionStore`，保存角色对话 turn log。
+12. 新增 `JsonlMemoryStore` 和 `MemoryManager`，先支持 session memory。
+13. 新增显式长期 memory 写入 API，但默认不自动写长期 memory。
+14. 新增 `PromptContextBuilder`，先只合并角色 prompt + conversation summary + memory。
+15. 测试不同 character/session/player 的 memory 不串线。
+16. 测试复制一个新角色包后无需修改 Harness Core 即可发现和对话。
+17. 再实现最小 `RagPipeline`，只支持关键词检索 story namespace。
+18. 再接 OpenAI-compatible backend。
+19. 最后接本地 GGUF backend。
 
-这个顺序能最快验证“角色系统接入 Harness”这个核心目标，同时不被真实模型加载、下载、多模态支持和项目结构重构拖慢。
+这个顺序能最快验证“角色包注册 + 角色对话 + Memory 接入 Harness”这个核心目标，同时不被 RAG、真实模型加载、下载、多模态支持和项目结构重构拖慢。
 
 ## 14. 结论
 
@@ -1319,6 +2001,12 @@ CharacterPackRegistry
 CharacterPromptAdapter
   -> 调用 PromptCompiler
   -> 输出 messages
+
+MemoryManager
+  -> 保存、召回、隔离运行时记忆
+
+RagPipeline
+  -> 检索外部知识并做权限过滤
 ```
 
 最终调用链应是：
@@ -1327,12 +2015,15 @@ CharacterPromptAdapter
 CharacterTurnRequest
   -> CharacterPackRegistry.resolve(character_id)
   -> PromptCompiler.build_npc_prompt()
+  -> MemoryManager.retrieve_for_turn()
+  -> RagPipeline.retrieve()
+  -> PromptContextBuilder.build()
   -> messages
   -> HarnessFacade.generate_chat()
   -> backend
 ```
 
-只要保持 `messages` 和 `debug` 的边界，且把角色作为数据包而不是代码分支，Harness 就可以逐步从 mock backend 升级到 OpenAI-compatible backend，再升级到本地 GGUF backend。这样既能保护角色知识边界，也能让 Harness 成为未来端侧 LLM 游戏 SDK 的稳定核心。
+只要保持 `messages`、`debug`、memory 和 RAG 的边界，且把角色作为数据包而不是代码分支，Harness 就可以逐步从 mock backend 升级到 OpenAI-compatible backend，再升级到本地 GGUF backend。这样既能保护角色知识边界，也能让 Harness 成为未来端侧 LLM 游戏 SDK 的稳定核心。
 
 最终扩展目标可以概括为：
 
@@ -1340,6 +2031,8 @@ CharacterTurnRequest
 模型可换
 角色可插拔
 剧情知识可检索
+运行记忆可沉淀
+RAG 知识可替换
 游戏状态可注入
 Prompt 编译统一
 Harness 只做编排

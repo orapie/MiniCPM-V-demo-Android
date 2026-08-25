@@ -242,10 +242,10 @@ Android 侧用 `SharedPreferences` 保存选中模型、图片切片数和模型
 Python 脚本用 `JsonPreferenceStore` 代替，默认写入：
 
 ```text
-<root>/.harness_state.json
+harness_logic/data/.harness_state.json
 ```
 
-默认 `root` 是当前目录，也可以通过命令行指定：
+默认 `root` 是 `harness_logic/data`，让这个 Python 子项目拥有独立的运行状态。也可以通过命令行指定：
 
 ```bash
 python3 harness_logic.py --root /tmp/harness-test status
@@ -278,14 +278,14 @@ python3 harness_logic.py --root /tmp/harness-test status
 模型文件默认放在：
 
 ```text
-<root>/models/<model_id>/
+harness_logic/data/models/<model_id>/
 ```
 
 例如：
 
 ```text
-models/minicpm-v-4/ggml-model-Q4_K_M.gguf
-models/minicpm-v-4/mmproj-model-f16.gguf
+harness_logic/data/models/minicpm-v-4/ggml-model-Q4_K_M.gguf
+harness_logic/data/models/minicpm-v-4/mmproj-model-f16.gguf
 ```
 
 这对应 Android 侧每个模型一个子目录的布局。
@@ -499,11 +499,11 @@ python3 harness_logic.py touch-demo-files
 
 用途是让 mock backend 能跑通 `load` 和 `prompt`。这些文件不是真模型，不能用于真实推理。
 
-建议测试时使用临时目录，避免在项目根目录创建占位模型：
+默认会在 `harness_logic/data` 中创建占位模型，不会写到仓库根目录：
 
 ```bash
-python3 harness_logic.py --root /tmp/harness-demo select llama-3.2-1b-instruct
-python3 harness_logic.py --root /tmp/harness-demo touch-demo-files
+python3 harness_logic.py select llama-3.2-1b-instruct
+python3 harness_logic.py touch-demo-files
 ```
 
 ### 12.8 load
@@ -538,17 +538,19 @@ python3 harness_logic.py delete
 
 ## 13. 推荐测试流程
 
-为了避免在项目根目录产生测试文件，建议使用临时 `--root`：
+默认测试流程会使用 `harness_logic/data`，不会复用仓库根目录的 `models/`：
 
 ```bash
-python3 harness_logic.py --root /tmp/harness-demo list
-python3 harness_logic.py --root /tmp/harness-demo select llama-3.2-1b-instruct
-python3 harness_logic.py --root /tmp/harness-demo status
-python3 harness_logic.py --root /tmp/harness-demo download-plan
-python3 harness_logic.py --root /tmp/harness-demo touch-demo-files
-python3 harness_logic.py --root /tmp/harness-demo load
-python3 harness_logic.py --root /tmp/harness-demo prompt 你好
+python3 harness_logic.py list
+python3 harness_logic.py select llama-3.2-1b-instruct
+python3 harness_logic.py status
+python3 harness_logic.py download-plan
+python3 harness_logic.py touch-demo-files
+python3 harness_logic.py load
+python3 harness_logic.py prompt 你好
 ```
+
+如果需要把运行数据放到别处，可以继续显式传 `--root`。
 
 这条链路会验证：
 
@@ -572,7 +574,7 @@ python3 harness_logic.py --root /tmp/harness-demo prompt 你好
 | `LlamaBackendAdapter` | `LlamaBackendAdapter.kt`，但 Python 里不接 JNI |
 | `HarnessFacade` | `HarnessFacade.kt` |
 | `.harness_state.json` | Android `SharedPreferences` |
-| `<root>/models/<model_id>/` | Android `filesDir/models/<model_id>/` |
+| `harness_logic/data/models/<model_id>/` | Android `filesDir/models/<model_id>/` |
 
 ## 15. 当前边界和限制
 

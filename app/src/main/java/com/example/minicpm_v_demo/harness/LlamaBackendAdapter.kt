@@ -37,6 +37,10 @@ class LlamaBackendAdapter(context: Context) : HarnessBackend {
         engine.prefillVideoFrames(frames, onProgress)
     }
 
+    override suspend fun setSystemPrompt(prompt: String) {
+        engine.setSystemPrompt(prompt)
+    }
+
     override suspend fun clearContext() {
         engine.clearContext()
     }

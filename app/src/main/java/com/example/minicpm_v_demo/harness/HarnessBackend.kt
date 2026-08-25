@@ -16,6 +16,7 @@ interface HarnessBackend {
         frames: List<ByteArray>,
         onProgress: suspend (current: Int, total: Int) -> Unit = { _, _ -> }
     )
+    suspend fun setSystemPrompt(prompt: String)
     suspend fun clearContext()
     suspend fun setImageMaxSliceNums(n: Int)
     fun sendUserPrompt(message: String, predictLength: Int): Flow<String>

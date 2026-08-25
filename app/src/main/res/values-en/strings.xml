@@ -27,6 +27,21 @@
     <string name="clear_chat">Clear Chat</string>
     <string name="clear_chat_confirm">Clear current chat?</string>
     <string name="clear_chat_toast">Chat cleared</string>
+    <string name="rag_mode">RAG Mode</string>
+    <string name="rag_mode_title">RAG Mode</string>
+    <string name="rag_mode_off">Off</string>
+    <string name="rag_mode_rag">RAG</string>
+    <string name="rag_mode_character_rag">Character + RAG</string>
+    <string name="rag_mode_changed">Switched to: %1$s</string>
+    <string name="rag_sources">Sources</string>
+    <string name="rag_prompt">Prompt</string>
+    <string name="rag_sources_title">Sources</string>
+    <string name="rag_prompt_title">Final Prompt</string>
+    <string name="rag_no_sources">No sources.</string>
+    <string name="character_select_title">Select Character</string>
+    <string name="character_changed">Character switched to: %1$s</string>
+    <string name="character_list_failed">No character cards available</string>
+    <string name="character_switch_failed">Failed to switch character: %1$s</string>
 
     <!-- Image slicing settings -->
     <string name="image_slice_settings">Image Slices</string>
@@ -57,6 +72,8 @@
     <string name="toast_image_failed">Failed to process image: %1$s</string>
     <string name="toast_video_failed">Failed to process video: %1$s</string>
     <string name="toast_unsupported_file">Unsupported file type: %1$s</string>
+    <string name="generation_failed">Generation failed: %1$s</string>
+    <string name="generation_empty_response">The model did not produce a visible response. Shorten the question or switch RAG mode and try again.</string>
     <string name="error_decode_image">Unable to decode image</string>
     <string name="error_read_image">Unable to read image</string>
     <string name="video_only_v46">Video understanding is only available on MiniCPM-V-4.6. Please switch models in Model Management.</string>

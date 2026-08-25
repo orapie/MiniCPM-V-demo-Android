@@ -34,3 +34,4 @@ app/cmake_test_build2/
 # Keep any directory named data, but ignore everything inside it.
 **/data/**
 !**/data/
+!harness_logic/data/.gitkeep

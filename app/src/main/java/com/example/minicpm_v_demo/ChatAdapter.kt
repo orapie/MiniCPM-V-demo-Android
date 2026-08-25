@@ -25,6 +25,8 @@ class ChatAdapter(
 
     private var onSuggestionClick: ((String) -> Unit)? = null
     private var onStopClick: (() -> Unit)? = null
+    private var onSourcesClick: ((ChatMessage.AiMessage) -> Unit)? = null
+    private var onPromptClick: ((ChatMessage.AiMessage) -> Unit)? = null
 
     private var activeAiHolder: AiMessageViewHolder? = null
     private var activeAiId: Long = -1L
@@ -35,6 +37,14 @@ class ChatAdapter(
 
     fun setOnStopClick(listener: () -> Unit) {
         onStopClick = listener
+    }
+
+    fun setOnSourcesClick(listener: (ChatMessage.AiMessage) -> Unit) {
+        onSourcesClick = listener
+    }
+
+    fun setOnPromptClick(listener: (ChatMessage.AiMessage) -> Unit) {
+        onPromptClick = listener
     }
 
     fun setActiveAiMessage(id: Long) {
@@ -174,6 +184,9 @@ class ChatAdapter(
         private val tvThinkingLabel: TextView = itemView.findViewById(R.id.tv_thinking_label)
         private val tvThinkingText: TextView = itemView.findViewById(R.id.tv_thinking_text)
         private val dividerThinking: View = itemView.findViewById(R.id.divider_thinking)
+        private val layoutRagActions: View = itemView.findViewById(R.id.layout_rag_actions)
+        private val btnSources: MaterialButton = itemView.findViewById(R.id.btn_sources)
+        private val btnPrompt: MaterialButton = itemView.findViewById(R.id.btn_prompt)
 
         private var thinkingExpanded = false
         private var streamingMinWidth = 0
@@ -188,6 +201,12 @@ class ChatAdapter(
             btnStop.setOnClickListener {
                 onStopClick?.invoke()
             }
+            layoutRagActions.visibility =
+                if (!item.isGenerating && (item.sources.isNotEmpty() || item.debugPrompt != null)) View.VISIBLE else View.GONE
+            btnSources.visibility = if (item.sources.isNotEmpty()) View.VISIBLE else View.GONE
+            btnPrompt.visibility = if (item.debugPrompt != null) View.VISIBLE else View.GONE
+            btnSources.setOnClickListener { onSourcesClick?.invoke(item) }
+            btnPrompt.setOnClickListener { onPromptClick?.invoke(item) }
         }
 
         fun updateText(text: String) {
@@ -287,7 +306,10 @@ class ChatAdapter(
                             oldItem.isVideo == newItem.isVideo
                 oldItem is ChatMessage.AiMessage && newItem is ChatMessage.AiMessage ->
                     oldItem.isGenerating == newItem.isGenerating &&
-                            (oldItem.isGenerating || oldItem.text == newItem.text)
+                            (oldItem.isGenerating || oldItem.text == newItem.text) &&
+                            oldItem.ragMode == newItem.ragMode &&
+                            oldItem.sources == newItem.sources &&
+                            oldItem.debugPrompt == newItem.debugPrompt
                 oldItem is ChatMessage.WelcomeCard && newItem is ChatMessage.WelcomeCard ->
                     oldItem.isTextOnly == newItem.isTextOnly
                 else -> false

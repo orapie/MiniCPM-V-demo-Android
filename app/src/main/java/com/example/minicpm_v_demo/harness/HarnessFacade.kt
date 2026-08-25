@@ -92,6 +92,10 @@ class HarnessFacade private constructor(
         backend.prefillVideoFrames(frames, onProgress)
     }
 
+    suspend fun setSystemPrompt(prompt: String) {
+        backend.setSystemPrompt(prompt)
+    }
+
     fun sendUserPrompt(
         message: String,
         predictLength: Int = LlamaEngine.DEFAULT_PREDICT_LENGTH

@@ -25,6 +25,16 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.textfield.TextInputEditText
 import com.example.minicpm_v_demo.harness.HarnessFacade
+import com.example.minicpm_v_demo.harness.character.CharacterCard
+import com.example.minicpm_v_demo.harness.rag.AndroidRagOrchestrator
+import com.example.minicpm_v_demo.harness.rag.CompiledAndroidPrompt
+import com.example.minicpm_v_demo.harness.rag.RagMode
+import com.example.minicpm_v_demo.harness.rag.RagSource
+import com.example.minicpm_v_demo.harness.data.HarnessDataPaths
+import com.example.minicpm_v_demo.harness.session.ChatSession
+import com.example.minicpm_v_demo.harness.session.ChatSessionStore
+import com.example.minicpm_v_demo.harness.session.ChatTurn
+import com.example.minicpm_v_demo.harness.session.MemoryStore
 import io.noties.markwon.Markwon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +50,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etInput: TextInputEditText
     private lateinit var btnSend: ImageButton
     private lateinit var btnImage: ImageButton
+    private lateinit var btnCharacter: ImageButton
+    private lateinit var btnRagMode: ImageButton
     private lateinit var btnClearChat: ImageButton
     private lateinit var btnModelManager: ImageButton
     private lateinit var btnImageSlice: ImageButton
@@ -48,6 +60,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvTitle: TextView
 
     private lateinit var harness: HarnessFacade
+    private lateinit var sessionStore: ChatSessionStore
+    private lateinit var memoryStore: MemoryStore
+    private var ragOrchestrator: AndroidRagOrchestrator? = null
+    private var currentSession: ChatSession? = null
+    private var currentRagMode: RagMode = RagMode.OFF
     private var generationJob: Job? = null
     private var isModelReady = false
     private var isImagePrefilled = false
@@ -58,11 +75,23 @@ class MainActivity : AppCompatActivity() {
     private val messages = mutableListOf<ChatMessage>()
     private var createdWithLocale: String? = null
     private var isLocaleRestart = false
+    private var currentCharacterId = DEFAULT_CHARACTER_ID
+    private var currentStoryCutoff: String? = DEFAULT_STORY_CUTOFF
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createdWithLocale = LocaleManager.currentLanguage(this).tag
         harness = HarnessFacade.getInstance(applicationContext)
+        val harnessPaths = HarnessDataPaths.from(applicationContext)
+        harnessPaths.ensureRuntimeDirs()
+        sessionStore = ChatSessionStore(harnessPaths)
+        memoryStore = MemoryStore(harnessPaths)
+        currentSession = sessionStore.loadRecentSession()
+        currentSession?.characterId?.takeIf { it.isNotBlank() }?.let { currentCharacterId = it }
+        currentStoryCutoff = currentSession?.storyCutoff ?: DEFAULT_STORY_CUTOFF
+        ragOrchestrator = runCatching { AndroidRagOrchestrator.fromContext(applicationContext) }
+            .onFailure { Log.e(TAG, "Failed to initialize Android RAG orchestrator", it) }
+            .getOrNull()
 
         // If the selected model is a TTS model, redirect to TtsActivity immediately.
         // The chat interface is only meaningful for LLM/VLM models.
@@ -97,6 +126,8 @@ class MainActivity : AppCompatActivity() {
         initViews()
         setupRecyclerView()
         setupClickListeners()
+        updateRagModeButton()
+        updateCharacterButton()
         observeEngineState()
     }
 
@@ -105,6 +136,8 @@ class MainActivity : AppCompatActivity() {
         etInput = findViewById(R.id.et_input)
         btnSend = findViewById(R.id.btn_send)
         btnImage = findViewById(R.id.btn_image)
+        btnCharacter = findViewById(R.id.btn_character)
+        btnRagMode = findViewById(R.id.btn_rag_mode)
         btnClearChat = findViewById(R.id.btn_clear_chat)
         btnModelManager = findViewById(R.id.btn_model_manager)
         btnImageSlice = findViewById(R.id.btn_image_slice)
@@ -117,6 +150,12 @@ class MainActivity : AppCompatActivity() {
         chatAdapter = ChatAdapter(Markwon.create(this))
         chatAdapter.setOnStopClick {
             harness.cancelGeneration()
+        }
+        chatAdapter.setOnSourcesClick { message ->
+            showSourcesDialog(message.sources)
+        }
+        chatAdapter.setOnPromptClick { message ->
+            showPromptDialog(message.debugPrompt.orEmpty())
         }
         chatAdapter.setOnSuggestionClick { suggestion ->
             if (isModelReady && !isProcessingVideo) {
@@ -143,7 +182,33 @@ class MainActivity : AppCompatActivity() {
 
         val selectedModel = harness.getSelectedModel()
         messages.add(ChatMessage.WelcomeCard(isTextOnly = selectedModel.isTextOnly))
+        restoreRecentSessionMessages()
         chatAdapter.submitList(messages.toList())
+    }
+
+    private fun restoreRecentSessionMessages() {
+        val restoredTurns = currentSession?.turns.orEmpty().takeLast(20)
+        if (restoredTurns.isEmpty()) return
+        var nextId = messageIdCounter
+        restoredTurns.forEach { turn ->
+            messages.add(
+                ChatMessage.UserMessage(
+                    id = nextId++,
+                    text = turn.userText,
+                ),
+            )
+            messages.add(
+                ChatMessage.AiMessage(
+                    id = nextId++,
+                    text = turn.assistantText,
+                    isGenerating = false,
+                    ragMode = runCatching { RagMode.valueOf(turn.ragMode) }.getOrNull(),
+                    sources = turn.sources,
+                    debugPrompt = turn.renderedPrompt,
+                ),
+            )
+        }
+        messageIdCounter = nextId
     }
 
     private fun setupClickListeners() {
@@ -155,6 +220,8 @@ class MainActivity : AppCompatActivity() {
         // [handleSelectedMedia] / [LlamaEngine.isVideoUnderstandingSupported]).
         btnImage.setOnClickListener { getMedia.launch(arrayOf("image/*", "video/*")) }
         btnSend.setOnClickListener { handleUserInput() }
+        btnCharacter.setOnClickListener { showCharacterDialog() }
+        btnRagMode.setOnClickListener { showRagModeDialog() }
         btnClearChat.setOnClickListener { showClearChatDialog() }
         btnModelManager.setOnClickListener {
             startActivity(Intent(this, ModelManagerActivity::class.java))
@@ -250,6 +317,8 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 harness.clearContext()
+                sessionStore.clearRecentSession()
+                currentSession = null
                 withContext(Dispatchers.Main) {
                     clearChatUI()
                     Toast.makeText(this@MainActivity, R.string.clear_chat_toast, Toast.LENGTH_SHORT).show()
@@ -614,14 +683,34 @@ class MainActivity : AppCompatActivity() {
 
         generationJob = lifecycleScope.launch(Dispatchers.Default) {
             val fullResponse = StringBuilder()
-            harness.sendUserPrompt(userMsg)
-                .onCompletion {
+            val promptInput = compilePromptForHarness(userMsg)
+            harness.sendUserPrompt(promptInput.modelInput)
+                .onCompletion { cause ->
+                    val finalText = when {
+                        cause != null -> {
+                            Log.e(TAG, "Generation failed", cause)
+                            getString(R.string.generation_failed, cause.message ?: cause::class.java.simpleName)
+                        }
+                        fullResponse.hasVisibleAssistantText() -> fullResponse.toString()
+                        else -> getString(R.string.generation_empty_response)
+                    }
+                    if (cause == null && fullResponse.hasVisibleAssistantText()) {
+                        saveCompletedHarnessTurn(
+                            userMsg = userMsg,
+                            assistantText = fullResponse.toString(),
+                            promptInput = promptInput,
+                            aiMsgId = aiMsgId,
+                        )
+                    }
                     withContext(Dispatchers.Main) {
                         val index = messages.indexOfFirst { it.id == aiMsgId }
                         if (index >= 0) {
                             messages[index] = (messages[index] as ChatMessage.AiMessage).copy(
-                                text = fullResponse.toString(),
-                                isGenerating = false
+                                text = finalText,
+                                isGenerating = false,
+                                ragMode = promptInput.compiled?.mode,
+                                sources = promptInput.compiled?.sources.orEmpty(),
+                                debugPrompt = promptInput.debugPrompt,
                             )
                         }
                         chatAdapter.setGeneratingDone(aiMsgId)
@@ -640,7 +729,10 @@ class MainActivity : AppCompatActivity() {
                             messages[index] = ChatMessage.AiMessage(
                                 id = aiMsgId,
                                 text = currentText,
-                                isGenerating = true
+                                isGenerating = true,
+                                ragMode = promptInput.compiled?.mode,
+                                sources = promptInput.compiled?.sources.orEmpty(),
+                                debugPrompt = promptInput.debugPrompt,
                             )
                         }
                         chatAdapter.updateStreamingText(aiMsgId, currentText)
@@ -648,6 +740,227 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
         }
+    }
+
+    private fun compilePromptForHarness(userMsg: String): HarnessPromptInput {
+        if (currentRagMode == RagMode.OFF) return HarnessPromptInput(userMsg, null)
+        val orchestrator = ragOrchestrator ?: return HarnessPromptInput(userMsg, null)
+        val compiled = runCatching {
+            val compiled = orchestrator.compile(
+                userInput = userMsg,
+                mode = currentRagMode,
+                characterId = currentCharacterId,
+                storyCutoff = currentStoryCutoff,
+                conversationSummary = currentSession?.conversationSummary.orEmpty(),
+                modelFamily = harness.getSelectedModelSpec().family,
+            )
+            Log.d(
+                TAG,
+                "Compiled ${compiled.mode} prompt: sources=${compiled.sources.size}, " +
+                    "contextChars=${compiled.contextText.length}, renderedChars=${compiled.renderedPrompt.length}, " +
+                    "modelInputChars=${compiled.modelInputForAndroidRuntime().length}",
+            )
+            compiled
+        }.getOrElse { error ->
+            Log.e(TAG, "Failed to compile RAG prompt; falling back to raw user input", error)
+            return HarnessPromptInput(userMsg, null)
+        }
+        return HarnessPromptInput(compiled.modelInputForAndroidRuntime(), compiled)
+    }
+
+    private fun CompiledAndroidPrompt.modelInputForAndroidRuntime(): String {
+        return listOf(
+            rendered.splitPrompt.systemPrompt,
+            rendered.splitPrompt.userPrompt,
+        ).joinToString("\n\n").trim()
+    }
+
+    private fun StringBuilder.hasVisibleAssistantText(): Boolean =
+        toString().visibleAssistantText().isNotBlank()
+
+    private fun String.visibleAssistantText(): String {
+        val start = indexOf("<think>")
+        if (start < 0) return trim()
+        val afterStart = substring(start + "<think>".length)
+        val end = afterStart.indexOf("</think>")
+        if (end < 0) return ""
+        return afterStart.substring(end + "</think>".length).trim()
+    }
+
+    private fun saveCompletedHarnessTurn(
+        userMsg: String,
+        assistantText: String,
+        promptInput: HarnessPromptInput,
+        aiMsgId: Long,
+    ) {
+        runCatching {
+            val modelId = harness.getSelectedModel().id
+            val session = currentSession ?: sessionStore.create(
+                characterId = currentCharacterId,
+                storyCutoff = currentStoryCutoff,
+                selectedModelId = modelId,
+            )
+            val turn = ChatTurn(
+                turnId = "turn-${System.currentTimeMillis()}-$aiMsgId",
+                userText = userMsg,
+                assistantText = assistantText,
+                ragMode = promptInput.compiled?.mode?.name ?: RagMode.OFF.name,
+                sources = promptInput.compiled?.sources.orEmpty(),
+                renderedPrompt = promptInput.debugPrompt,
+                characterId = session.characterId,
+                modelId = modelId,
+            )
+            val updatedSession = sessionStore.appendTurn(session, turn)
+            memoryStore.observeTurn(updatedSession, turn)
+            currentSession = updatedSession
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to persist harness session turn", error)
+        }
+    }
+
+    private fun showRagModeDialog() {
+        val labels = arrayOf(
+            getString(R.string.rag_mode_off),
+            getString(R.string.rag_mode_rag),
+            getString(R.string.rag_mode_character_rag),
+        )
+        val modes = arrayOf(RagMode.OFF, RagMode.RAG, RagMode.CHARACTER_RAG)
+        val checked = modes.indexOf(currentRagMode).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.rag_mode_title)
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                currentRagMode = modes[which]
+                updateRagModeButton()
+                Toast.makeText(
+                    this,
+                    getString(R.string.rag_mode_changed, labels[which]),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun updateRagModeButton() {
+        btnRagMode.alpha = if (currentRagMode == RagMode.OFF) 0.45f else 1.0f
+        btnRagMode.contentDescription = "${getString(R.string.rag_mode)}: ${ragModeLabel(currentRagMode)}"
+    }
+
+    private fun showCharacterDialog() {
+        val orchestrator = ragOrchestrator
+        if (orchestrator == null) {
+            Toast.makeText(this, R.string.character_list_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val characters = runCatching { orchestrator.availableCharacters() }
+            .onFailure { Log.e(TAG, "Failed to list characters", it) }
+            .getOrDefault(emptyList())
+        if (characters.isEmpty()) {
+            Toast.makeText(this, R.string.character_list_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = characters.map { it.displayLabel() }.toTypedArray()
+        val checked = characters.indexOfFirst { it.npcId == currentCharacterId }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.character_select_title)
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                switchCharacter(characters[which])
+                dialog.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun switchCharacter(character: CharacterCard) {
+        if (character.npcId == currentCharacterId) return
+        generationJob?.cancel()
+        harness.cancelGeneration()
+        currentCharacterId = character.npcId
+        currentStoryCutoff = character.knowledgeScope.storyCutoff
+        currentSession = null
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                if (harness.state.value is LlamaState.ModelReady) {
+                    harness.clearContext()
+                }
+                sessionStore.clearRecentSession()
+                withContext(Dispatchers.Main) {
+                    clearChatUI()
+                    updateCharacterButton(character)
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.character_changed, character.identity.name),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error switching character", e)
+                withContext(Dispatchers.Main) {
+                    updateCharacterButton(character)
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.character_switch_failed, e.message),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun updateCharacterButton(character: CharacterCard? = null) {
+        val label = character?.identity?.name
+            ?: runCatching {
+                ragOrchestrator?.availableCharacters()
+                    ?.firstOrNull { it.npcId == currentCharacterId }
+                    ?.identity
+                    ?.name
+            }.getOrNull()
+            ?: currentCharacterId
+        btnCharacter.contentDescription = "${getString(R.string.character_select_title)}: $label"
+    }
+
+    private fun CharacterCard.displayLabel(): String {
+        return "${identity.name} (${npcId})"
+    }
+
+    private fun showSourcesDialog(sources: List<RagSource>) {
+        val text = if (sources.isEmpty()) {
+            getString(R.string.rag_no_sources)
+        } else {
+            sources.mapIndexed { index, source ->
+                "${index + 1}. ${source.source}\nspan=${source.start}:${source.end}  score=${"%.4f".format(source.score)}"
+            }.joinToString("\n\n")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.rag_sources_title)
+            .setMessage(text)
+            .setPositiveButton(R.string.confirm, null)
+            .show()
+    }
+
+    private fun showPromptDialog(prompt: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.rag_prompt_title)
+            .setMessage(prompt)
+            .setPositiveButton(R.string.confirm, null)
+            .show()
+    }
+
+    private fun ragModeLabel(mode: RagMode): String {
+        return when (mode) {
+            RagMode.OFF -> getString(R.string.rag_mode_off)
+            RagMode.RAG -> getString(R.string.rag_mode_rag)
+            RagMode.CHARACTER_RAG -> getString(R.string.rag_mode_character_rag)
+        }
+    }
+
+    private data class HarnessPromptInput(
+        val modelInput: String,
+        val compiled: CompiledAndroidPrompt?,
+    ) {
+        val debugPrompt: String?
+            get() = compiled?.let { modelInput }
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -725,5 +1038,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private val TAG = MainActivity::class.java.simpleName
+        private const val DEFAULT_CHARACTER_ID = "lu_jiangxian"
+        private const val DEFAULT_STORY_CUTOFF = "evt-010"
     }
 }

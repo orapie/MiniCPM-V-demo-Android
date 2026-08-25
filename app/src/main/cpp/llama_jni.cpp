@@ -628,7 +628,8 @@ Java_com_example_minicpm_1v_1demo_LlamaEngine_processUserPrompt(
         cached_token_chars = "<think>\n";
     }
 
-    if (g_ctx_vision) {
+    const bool use_plain_text_eval = g_ctx_vision && !g_image_prefilled && !g_vision_mode;
+    if (g_ctx_vision && !use_plain_text_eval) {
         mtmd_input_text text;
         text.text          = formatted_user_prompt.c_str();
         text.add_special   = current_position == 0;
@@ -655,6 +656,10 @@ Java_com_example_minicpm_1v_1demo_LlamaEngine_processUserPrompt(
         generation_start_position = current_position;
         mtmd_input_chunks_free(chunks);
     } else {
+        if (use_plain_text_eval) {
+            LOGi("%s: Using fast text eval path with mmproj loaded (no image/video in context)",
+                 __func__);
+        }
         auto user_tokens = common_tokenize(g_context, formatted_user_prompt, current_position == 0, true);
         for (auto id: user_tokens) {
             LOGv("token: `%s`\t -> `%d`", common_token_to_piece(g_context, id).c_str(), id);

@@ -57,13 +57,10 @@ class LlamaEngine private constructor(
 
         // Per-turn token budget. iOS demo (MTMDParams.swift) uses 100 because
         // ANE makes generation fast enough that the cap is rarely hit; on
-        // Android with CPU-only inference users complained about replies
-        // getting truncated mid-sentence, so we raise it to a safer ceiling.
-        // 512 tokens is roughly 250-350 Chinese characters per turn, which
-        // covers the vast majority of single-turn answers; the n_ctx=4096
-        // buffer plus shift_context() in llama_jni.cpp still keeps multi-turn
-        // chats stable.
-        const val DEFAULT_PREDICT_LENGTH = 1024
+        // Android is CPU-only in this demo path. Keep the default answer
+        // budget modest so VLM/RAG turns return quickly on emulator and
+        // mid-range devices; longer-form answers should opt in explicitly.
+        const val DEFAULT_PREDICT_LENGTH = 128
 
         const val MODEL_SUBDIR = "models"
 
@@ -1163,7 +1160,8 @@ class LlamaEngine private constructor(
             processUserPrompt(message, predictLength).let { result ->
                 if (result != 0) {
                     Log.e(TAG, "Failed to process user prompt: $result")
-                    return@flow
+                    _state.value = LlamaState.ModelReady
+                    throw RuntimeException("Failed to process user prompt: $result")
                 }
             }
 
@@ -1186,7 +1184,7 @@ class LlamaEngine private constructor(
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error during generation!", e)
-            _state.value = LlamaState.Error(e)
+            _state.value = LlamaState.ModelReady
             throw e
         }
     }.flowOn(llamaDispatcher)

@@ -1,6 +1,8 @@
 package com.example.minicpm_v_demo
 
 import android.graphics.Bitmap
+import com.example.minicpm_v_demo.harness.rag.RagMode
+import com.example.minicpm_v_demo.harness.rag.RagSource
 
 sealed class ChatMessage {
     abstract val id: Long
@@ -21,7 +23,10 @@ sealed class ChatMessage {
     data class AiMessage(
         override val id: Long,
         val text: String,
-        val isGenerating: Boolean = false
+        val isGenerating: Boolean = false,
+        val ragMode: RagMode? = null,
+        val sources: List<RagSource> = emptyList(),
+        val debugPrompt: String? = null
     ) : ChatMessage()
 
     data class WelcomeCard(
